@@ -4,6 +4,8 @@
 > public sites with a streaming API and a modern UI — gated behind a
 > members-only login that admins fully control.
 
+🌐 **Live demo**: <https://yesmyyt-cacadoxx.hf.space>
+
 Cacadoxx is a small, modern web app inspired by
 [maigret](https://github.com/soxoj/maigret). It checks whether a given
 username has a public profile on hundreds of sites and streams the results

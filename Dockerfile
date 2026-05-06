@@ -6,9 +6,11 @@
 # the entrypoint honours it via ${PORT:-8080}.
 #
 # Build context = repo root. Locally: `docker build -t cacadoxx .`
-# Then: `docker run --rm -p 7860:7860 -e PORT=7860 \
+# Then: `docker run --rm -p 7860:7860 \
 #         -e CACADOXX_ADMIN_USERNAME=admin \
 #         -e CACADOXX_ADMIN_PASSWORD=changeme cacadoxx`
+#
+# Live deployment: https://yesmyyt-cacadoxx.hf.space
 
 # ---- Stage 1: build the React frontend ----
 FROM node:20-alpine AS frontend
@@ -39,12 +41,12 @@ COPY backend/app ./app
 COPY --from=frontend /src/dist ./app/static
 
 ENV PYTHONUNBUFFERED=1 \
-    PORT=8080 \
+    PORT=7860 \
     CACADOXX_DB_PATH=/data/cacadoxx.db
 
 # /data is writable on Hugging Face Spaces persistent volumes; falls back
 # to /tmp at runtime if /data isn't writable.
 RUN mkdir -p /data && chmod 777 /data
 
-EXPOSE 8080
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+EXPOSE 7860
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}"]
