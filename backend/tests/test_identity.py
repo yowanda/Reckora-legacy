@@ -181,9 +181,9 @@ def test_known_identity_overrides_shape() -> None:
     for site_name, types in identity.KNOWN_IDENTITY_OVERRIDES.items():
         assert types, f"{site_name!r} has empty identity_types"
         for t in types:
-            assert (
-                t in identity.ALL_IDENTITY_TYPES
-            ), f"{site_name!r} declares unknown identity_type {t!r}"
+            assert t in identity.ALL_IDENTITY_TYPES, (
+                f"{site_name!r} declares unknown identity_type {t!r}"
+            )
 
 
 def test_known_identity_overrides_includes_gravatar_and_yandex() -> None:

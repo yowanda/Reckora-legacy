@@ -19,7 +19,12 @@ repos:
         args: ["--fix=lf"]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.7.4
+    # Pin to the ruff version exercised by CI (uv resolves 0.15.12 from
+    # backend/pyproject.toml). Keep these in lock-step — ruff-format
+    # output diverges between minor releases and a stale pre-commit pin
+    # silently rewrites files into a shape the CI ``ruff format --check``
+    # then rejects.
+    rev: v0.15.12
     hooks:
       - id: ruff
         args: ["--fix"]
