@@ -30,7 +30,9 @@ RUN pip install --upgrade pip && \
     pip install --prefix=/install \
       "fastapi[standard]>=0.115.0" "uvicorn[standard]>=0.30.0" \
       "httpx[http2,brotli]>=0.27.0" "pydantic>=2.8.0" "pydantic-settings>=2.4.0" \
-      "slowapi>=0.1.9" "orjson>=3.10.0" "anyio>=4.4.0"
+      "slowapi>=0.1.9" "orjson>=3.10.0" "anyio>=4.4.0" \
+      "curl-cffi>=0.7.0" "socid-extractor>=0.0.27" \
+      "onnxruntime>=1.18.0" "numpy>=1.26.0"
 
 
 # ---- Stage 3: runtime ----
