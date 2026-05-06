@@ -1,0 +1,38 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/node_modules/
+backend/app/static/
+.pnpm-debug.log
+.eslintcache
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Fly
+.fly/
+
+# Runtime state
+backend/var/
+*.db
+*.sqlite
+*.sqlite3

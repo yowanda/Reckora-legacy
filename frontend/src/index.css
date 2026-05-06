@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-bg text-zinc-100 font-sans antialiased;
+    background-image:
+      radial-gradient(1200px 600px at 80% -10%, rgba(124,92,255,0.15), transparent 60%),
+      radial-gradient(800px 500px at -10% 110%, rgba(61,220,132,0.08), transparent 55%);
+  }
+  ::selection { background: rgba(124,92,255,0.4); }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-white shadow-lg shadow-accent/20 transition hover:bg-accent-soft disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card/60 px-3 py-1.5 text-sm text-zinc-300 transition hover:bg-bg-card;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-bg-border bg-bg-card px-2.5 py-0.5 text-xs text-zinc-300;
+  }
+  .input {
+    @apply w-full rounded-lg border border-bg-border bg-bg-card/80 px-4 py-3 text-zinc-100 placeholder-zinc-500 outline-none transition focus:border-accent focus:bg-bg-card focus:ring-2 focus:ring-accent/30;
+  }
+  .card {
+    @apply rounded-xl border border-bg-border bg-bg-card/70 backdrop-blur;
+  }
+}
