@@ -73,6 +73,20 @@ class Settings(BaseSettings):
     # keep — older scans are pruned on insert.
     enable_scan_history: bool = True
     scan_history_max_per_user: int = 50
+    # Phase 5e: optional outbound proxy. ``proxy_url`` is read once at
+    # process start (env var: ``RECKORA_PROXY_URL``) and supports any
+    # scheme httpx understands (``socks5://`` / ``socks5h://`` /
+    # ``http://`` / ``https://``). Leaving it blank disables the
+    # feature entirely. The runtime gate is a separate
+    # admin-configurable boolean knob (``proxy_enabled``) so an
+    # operator can flip the switch without restarting; an unset
+    # ``proxy_url`` makes the knob a no-op.
+    proxy_url: str = ""
+    # Default value of the ``proxy_enabled`` admin knob. Set to 1 via
+    # ``RECKORA_PROXY_ENABLED_DEFAULT=1`` to opt every freshly-deployed
+    # instance into the proxy by default; admins can still override at
+    # runtime via ``PATCH /api/admin/settings``.
+    proxy_enabled_default: int = 0
 
 
 settings = Settings()

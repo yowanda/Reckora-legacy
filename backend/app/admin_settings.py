@@ -101,6 +101,19 @@ KNOBS: tuple[KnobSpec, ...] = (
             "leads but also more noise."
         ),
     ),
+    KnobSpec(
+        key="proxy_enabled",
+        settings_attr="proxy_enabled_default",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 5e: when 1, all outbound site probes are routed "
+            "through ``RECKORA_PROXY_URL`` (Tor SOCKS5 / HTTP CONNECT / "
+            "etc.). When 0, the proxy is bypassed even if a URL is "
+            "configured. Setting this to 1 with no URL configured is a "
+            "no-op — the runtime falls back to direct egress."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

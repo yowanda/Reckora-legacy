@@ -9,6 +9,7 @@ import type {
   GraphEdge,
   GraphExtracted,
   Member,
+  ProxyStatus,
   PublicSettingsResponse,
   Role,
   ScanDetail,
@@ -214,6 +215,24 @@ export async function adminReloadCatalog(): Promise<{ ok: boolean; sites: number
 export async function fetchEffectiveSettings(): Promise<EffectiveSettings> {
   const body = await jsonFetch<PublicSettingsResponse>('/api/settings')
   return body.settings
+}
+
+export async function fetchPublicSettings(): Promise<PublicSettingsResponse> {
+  return jsonFetch<PublicSettingsResponse>('/api/settings')
+}
+
+export async function fetchHealth(): Promise<{
+  status: string
+  version: string
+  sites: number
+  proxy?: ProxyStatus
+}> {
+  return jsonFetch<{
+    status: string
+    version: string
+    sites: number
+    proxy?: ProxyStatus
+  }>('/api/health')
 }
 
 export async function adminGetKnobs(): Promise<AdminKnobsResponse> {

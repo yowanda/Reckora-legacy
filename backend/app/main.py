@@ -24,6 +24,7 @@ from . import admin_settings as admin_settings_mod
 from . import auth as auth_mod
 from . import history as history_mod
 from . import permutations as permutations_mod
+from . import proxy as proxy_mod
 from . import site_overrides as overrides_mod
 from .auth import (
     SESSION_COOKIE,
@@ -316,7 +317,14 @@ async def admin_patch_member(
 
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
-    return {"status": "ok", "version": __version__, "sites": len(get_catalog().sites)}
+    return {
+        "status": "ok",
+        "version": __version__,
+        "sites": len(get_catalog().sites),
+        # Phase 5e: surface proxy state without leaking the URL itself
+        # so an external uptime probe can flag a dropped Tor circuit.
+        "proxy": proxy_mod.status(),
+    }
 
 
 @app.get("/api/sites")
@@ -341,6 +349,24 @@ async def list_sites(
 
 def _sse_event(event: str, payload: dict[str, Any]) -> bytes:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
+
+
+def _new_async_client() -> httpx.AsyncClient:
+    """Build the shared httpx client used by all three search streams.
+
+    Centralised so the proxy gate (Phase 5e) is uniformly applied; the
+    extra arg is harmless when the proxy is off (``None``).
+    """
+    return httpx.AsyncClient(
+        timeout=settings.request_timeout,
+        http2=True,
+        limits=httpx.Limits(
+            max_connections=settings.total_concurrency,
+            max_keepalive_connections=settings.total_concurrency,
+        ),
+        follow_redirects=True,
+        proxy=proxy_mod.proxy_url_or_none(),
+    )
 
 
 async def _search_stream(
@@ -371,18 +397,8 @@ async def _search_stream(
 
     started_at = history_mod.now_unix()
     collected: list[dict[str, Any]] = []
-    # Phase 1: enable HTTP/2 (httpx[http2] -> h2). Saves ~1 RTT per host on
-    # warm pools and is widely deployed across CMS-hosted sites. brotli is
-    # auto-negotiated via Accept-Encoding when httpx[brotli] is installed.
-    async with httpx.AsyncClient(
-        timeout=settings.request_timeout,
-        http2=True,
-        limits=httpx.Limits(
-            max_connections=settings.total_concurrency,
-            max_keepalive_connections=settings.total_concurrency,
-        ),
-        follow_redirects=True,
-    ) as client:
+    # Phase 1: HTTP/2 + connection pool. Phase 5e: optional proxy.
+    async with _new_async_client() as client:
         async for result in stream_checks(sites, req.username, client=client):
             payload = result.to_dict()
             collected.append(payload)
@@ -481,15 +497,7 @@ async def _graph_search_stream(
     edges: list[dict[str, Any]] = []
     discovered: dict[str, str] = {}  # child_username -> source description
 
-    async with httpx.AsyncClient(
-        timeout=settings.request_timeout,
-        http2=True,
-        limits=httpx.Limits(
-            max_connections=settings.total_concurrency,
-            max_keepalive_connections=settings.total_concurrency,
-        ),
-        follow_redirects=True,
-    ) as client:
+    async with _new_async_client() as client:
         # ---- depth 0: primary scan ------------------------------------
         seed_hits: list[tuple[str, dict[str, Any]]] = []  # (parent, payload)
         async for result in stream_checks(sites, req.username, client=client):
@@ -691,15 +699,7 @@ async def _permute_search_stream(
     started_at = history_mod.now_unix()
     collected: list[dict[str, Any]] = []
     candidates_run = 0
-    async with httpx.AsyncClient(
-        timeout=settings.request_timeout,
-        http2=True,
-        limits=httpx.Limits(
-            max_connections=settings.total_concurrency,
-            max_keepalive_connections=settings.total_concurrency,
-        ),
-        follow_redirects=True,
-    ) as client:
+    async with _new_async_client() as client:
         for index, handle in enumerate(handles):
             yield _sse_event(
                 "candidate_start",
@@ -936,6 +936,10 @@ class AdminSettingsPatch(BaseModel):
     graph_max_secondary: int | None = None
     graph_max_seed_hits: int | None = None
     extract_min_confidence: int | None = None
+    # Phase 5e: proxy_enabled is a 0/1 toggle gating the configured
+    # ``RECKORA_PROXY_URL``. The URL itself is intentionally NOT
+    # exposed via this endpoint — it stays env-only.
+    proxy_enabled: int | None = None
     # Per-key sentinel: when present in ``reset`` the override row is
     # deleted regardless of whether ``<key>=None`` was sent (allows
     # disambiguating "don't touch" vs "reset to default" on PATCH).
@@ -951,7 +955,10 @@ async def public_settings(
     The frontend uses this to surface, for example, the maximum recursion
     depth currently allowed so the depth slider can clamp itself.
     """
-    return {"settings": admin_settings_mod.effective_map()}
+    return {
+        "settings": admin_settings_mod.effective_map(),
+        "proxy": proxy_mod.status(),
+    }
 
 
 @app.get("/api/admin/settings")

@@ -96,6 +96,7 @@ export type AdminKnobKey =
   | 'graph_max_secondary'
   | 'graph_max_seed_hits'
   | 'extract_min_confidence'
+  | 'proxy_enabled'
 
 export interface AdminKnob {
   key: AdminKnobKey
@@ -113,8 +114,23 @@ export interface AdminKnobsResponse {
 
 export type EffectiveSettings = Record<AdminKnobKey, number>
 
+// ---------------------------------------------------------------------------
+// Phase 5e: outbound proxy state. The descriptor never carries the
+// proxy URL itself — only its scheme + on/off state — so the SPA can
+// render a small "via tor" / "via http proxy" badge without leaking
+// infrastructure details.
+// ---------------------------------------------------------------------------
+
+export interface ProxyStatus {
+  configured: boolean
+  enabled: boolean
+  active: boolean
+  scheme: string
+}
+
 export interface PublicSettingsResponse {
   settings: EffectiveSettings
+  proxy: ProxyStatus
 }
 
 export interface AdminKnobsPatch {
@@ -122,6 +138,7 @@ export interface AdminKnobsPatch {
   graph_max_secondary?: number | null
   graph_max_seed_hits?: number | null
   extract_min_confidence?: number | null
+  proxy_enabled?: number | null
   reset?: AdminKnobKey[]
 }
 

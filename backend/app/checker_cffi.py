@@ -102,10 +102,19 @@ class CffiRescue:
             # supported browser fingerprints. The value comes from a
             # runtime-mutable settings knob, so erase to Any at the
             # boundary rather than re-export curl-cffi's literal here.
-            self._session = AsyncSession(
-                impersonate=cast(Any, settings.cffi_impersonate),
-                timeout=settings.cffi_timeout,
-            )
+            # Phase 5e: route through the operator-configured proxy
+            # when the runtime toggle is on. ``None`` is the curl-cffi
+            # default and behaves identically to direct egress.
+            from . import proxy as proxy_mod
+
+            session_kwargs: dict[str, Any] = {
+                "impersonate": cast(Any, settings.cffi_impersonate),
+                "timeout": settings.cffi_timeout,
+            }
+            proxy_url = proxy_mod.proxy_url_or_none()
+            if proxy_url:
+                session_kwargs["proxy"] = proxy_url
+            self._session = AsyncSession(**session_kwargs)
         except Exception:
             self._session_unavailable = True
             return None

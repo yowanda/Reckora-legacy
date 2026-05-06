@@ -7,6 +7,7 @@ const PRETTY: Record<AdminKnobKey, string> = {
   graph_max_secondary: 'Secondary fanout',
   graph_max_seed_hits: 'Seed hits cap',
   extract_min_confidence: 'Extractor confidence floor',
+  proxy_enabled: 'Outbound proxy',
 }
 
 function knobsToDraft(rows: AdminKnob[]): Record<AdminKnobKey, number> {

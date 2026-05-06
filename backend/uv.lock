@@ -667,6 +667,9 @@ brotli = [
 http2 = [
     { name = "h2" },
 ]
+socks = [
+    { name = "socksio" },
+]
 
 [[package]]
 name = "hyperframe"
@@ -1563,7 +1566,7 @@ dependencies = [
     { name = "curl-cffi" },
     { name = "email-validator" },
     { name = "fastapi", extra = ["standard"] },
-    { name = "httpx", extra = ["brotli", "http2"] },
+    { name = "httpx", extra = ["brotli", "http2", "socks"] },
     { name = "jinja2" },
     { name = "numpy" },
     { name = "onnxruntime" },
@@ -1595,7 +1598,7 @@ requires-dist = [
     { name = "curl-cffi", specifier = ">=0.7.0" },
     { name = "email-validator", specifier = ">=2.0.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.0" },
-    { name = "httpx", extras = ["http2", "brotli"], specifier = ">=0.27.0" },
+    { name = "httpx", extras = ["http2", "brotli", "socks"], specifier = ">=0.27.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.0" },
     { name = "numpy", specifier = ">=1.26.0" },
@@ -1969,6 +1972,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/23/90/507ef3431f886f833f65f99eab076eb7123a86fc92fc732e49b01c6adaef/socid_extractor-0.0.28.tar.gz", hash = "sha256:3be6bf4a84a14097d3664e649d4b50a1de808f13af9f739d4ad5e5f41ad5a7c2", size = 75761, upload-time = "2026-04-09T14:42:11.935Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4c/a7/5649d81868279fe9804dbd9378747ba8b590f18a26803c9edbba7fbd8daf/socid_extractor-0.0.28-py3-none-any.whl", hash = "sha256:1fc8b448cfe9d483597f4b606ac8104193feb24a92e8b95cd1e41a9661ca506c", size = 39837, upload-time = "2026-04-09T14:42:10.663Z" },
+]
+
+[[package]]
+name = "socksio"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/5c/48a7d9495be3d1c651198fd99dbb6ce190e2274d0f28b9051307bdec6b85/socksio-1.0.0.tar.gz", hash = "sha256:f88beb3da5b5c38b9890469de67d0cb0f9d494b78b106ca1845f96c10b91c4ac", size = 19055, upload-time = "2020-04-17T15:50:34.664Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/c3/6eeb6034408dac0fa653d126c9204ade96b819c936e136c5e8a6897eee9c/socksio-1.0.0-py3-none-any.whl", hash = "sha256:95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3", size = 12763, upload-time = "2020-04-17T15:50:31.878Z" },
 ]
 
 [[package]]

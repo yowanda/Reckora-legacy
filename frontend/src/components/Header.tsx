@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react'
+import { fetchHealth } from '../api'
 import { useAuth } from '../auth-context'
+import type { ProxyStatus } from '../types'
 
 interface Props {
   view: 'search' | 'admin'
@@ -8,6 +11,23 @@ interface Props {
 export function Header({ view, onChangeView }: Props) {
   const { member, logout } = useAuth()
   const isAdmin = member?.role === 'admin'
+  const [proxy, setProxy] = useState<ProxyStatus | null>(null)
+
+  useEffect(() => {
+    if (!member) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const h = await fetchHealth()
+        if (!cancelled && h.proxy) setProxy(h.proxy)
+      } catch {
+        // health is best-effort; the badge just stays hidden
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [member])
 
   return (
     <header className="sticky top-0 z-30 border-b border-bg-border bg-bg/80 backdrop-blur">
@@ -22,6 +42,20 @@ export function Header({ view, onChangeView }: Props) {
           <span className="ml-1 rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-accent">
             beta
           </span>
+          {proxy?.active && (
+            <span
+              className="ml-1 rounded-full border border-good/40 bg-good/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-good"
+              title={
+                proxy.scheme
+                  ? `outbound traffic via ${proxy.scheme}`
+                  : 'outbound traffic via configured proxy'
+              }
+            >
+              {proxy.scheme === 'socks5' || proxy.scheme === 'socks5h'
+                ? 'via tor'
+                : `via ${proxy.scheme || 'proxy'}`}
+            </span>
+          )}
         </button>
         <nav className="flex items-center gap-2 text-sm text-zinc-400">
           <button
