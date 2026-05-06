@@ -76,6 +76,31 @@ export function ResultCard({ r }: { r: CheckResult }) {
                 ! conflict
               </span>
             )}
+            {r.signals?.includes('link-verified-live') && (
+              <span
+                className="chip border border-ok/40 bg-ok/10 !py-0 text-[10px] text-ok"
+                title="Phase 5h: link liveness probe confirmed a real profile page behind this URL."
+                data-testid="badge-link-live"
+              >
+                Link verified live
+              </span>
+            )}
+            {r.status === 'unknown' &&
+              r.signals?.some(
+                (s) =>
+                  s.startsWith('link-dead-after-claim:') ||
+                  s.startsWith('link-redirects-login:') ||
+                  s.startsWith('link-redirects-home:') ||
+                  s.startsWith('display-url-dead:'),
+              ) && (
+                <span
+                  className="chip border border-warn/40 bg-warn/10 !py-0 text-[10px] text-warn"
+                  title="Phase 5h: link liveness probe found the display URL is dead, redirected, or a soft-404."
+                  data-testid="badge-link-dead"
+                >
+                  Demoted (link dead)
+                </span>
+              )}
             {hasExtracted && (
               <button
                 type="button"

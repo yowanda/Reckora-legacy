@@ -1,4 +1,4 @@
-import type { SearchProgress } from '../types'
+import type { CheckResult, SearchProgress } from '../types'
 
 interface Props {
   progress: SearchProgress
@@ -6,6 +6,7 @@ interface Props {
 
 export function Stats({ progress }: Props) {
   const counts = countByStatus(progress.results)
+  const filtered = countFiltered(progress.results)
   const pct = progress.total ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : 0
 
   return (
@@ -16,6 +17,12 @@ export function Stats({ progress }: Props) {
         <Pill label="unknown" value={counts.unknown} color="text-warn" />
         <Pill label="blocked" value={counts.blocked} color="text-purple-300" />
         <Pill label="error" value={counts.error} color="text-bad" />
+        {filtered.link > 0 && (
+          <Pill label="Filtered (link)" value={filtered.link} color="text-amber-400" />
+        )}
+        {filtered.confidence > 0 && (
+          <Pill label="Filtered (confidence)" value={filtered.confidence} color="text-amber-400" />
+        )}
         <span className="ml-auto text-xs text-zinc-500">
           {progress.done}/{progress.total} checked
           {progress.cached && <span className="ml-2 text-accent">cached</span>}
@@ -54,4 +61,32 @@ function countByStatus(results: SearchProgress['results']) {
   }
   for (const r of results) out[r.status] = (out[r.status] ?? 0) + 1
   return out as { claimed: number; free: number; unknown: number; blocked: number; error: number; skipped: number }
+}
+
+const LINK_DEMOTE_PREFIXES = [
+  'link-dead-after-claim:',
+  'link-redirects-login:',
+  'link-redirects-home:',
+  'display-url-dead:',
+]
+
+const CONFIDENCE_DEMOTE_PREFIXES = [
+  'claimed-below-confidence-floor:',
+  'claimed-below-ml-floor:',
+  'claimed-not-verified',
+]
+
+function isDemotedBy(r: CheckResult, prefixes: string[]): boolean {
+  if (r.status !== 'unknown' || !r.signals) return false
+  return r.signals.some((s) => prefixes.some((p) => s.startsWith(p)))
+}
+
+function countFiltered(results: SearchProgress['results']) {
+  let link = 0
+  let confidence = 0
+  for (const r of results) {
+    if (isDemotedBy(r, LINK_DEMOTE_PREFIXES)) link++
+    if (isDemotedBy(r, CONFIDENCE_DEMOTE_PREFIXES)) confidence++
+  }
+  return { link, confidence }
 }
