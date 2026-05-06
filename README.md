@@ -1,3 +1,15 @@
+---
+title: Reckora
+emoji: 🎯
+colorFrom: indigo
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: Members-only OSINT username footprint scanner
+license: mit
+---
+
 # Reckora
 
 > Recon any username across the open web. Concurrent OSINT lookup over
