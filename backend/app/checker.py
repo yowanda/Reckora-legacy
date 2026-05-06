@@ -505,6 +505,17 @@ def _classify_message(body: str, site: Site) -> tuple[Status, list[str]]:
 
 
 def _classify_response(resp: httpx.Response, body: str, site: Site) -> tuple[Status, list[str]]:
+    # Phase 6b: engine-aware probe — override generic classifier when the
+    # site declares an engine that has a registered probe function.
+    if site.engine:
+        from .engine_probes import ENGINE_PROBES
+
+        probe = ENGINE_PROBES.get(site.engine)
+        if probe is not None:
+            result = probe(resp, body, site)
+            if result is not None:
+                return result
+
     if site.error_strs and any(s in body for s in site.error_strs):
         return Status.ERROR, ["error-string-match"]
     if site.check_type == "status_code":

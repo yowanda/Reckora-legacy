@@ -13,10 +13,10 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 | --- | --- |
 | Repo HEAD on main | `784ac59` (Phase 5h-FE — SPA signal badges + Stats counters + Playwright e2e) |
 | HF Space HEAD | `784ac59` (mirrors main; Docker rebuilt + /api/health 200 verified) |
-| Active batch | **Phase 6b — engine-aware probe heuristics** |
-| Last batch shipped | Phase 6a — regenerated sites.json from maigret upstream + identityTypes auto-import (2506 sites, 8 identity-annotated) |
-| Last update | 2026-05-06 (Phase 6a — regen sites.json) |
-| Test baseline | backend pytest **228 / 228** · mypy 17 src files · ruff clean · frontend lint+build green · e2e **4 / 4** |
+| Active batch | **Phase 6c — head-to-head benchmark vs maigret** |
+| Last batch shipped | Phase 6b — engine-aware probe heuristics (XenForo/Discourse/vBulletin/uCoz) + 13 tests |
+| Last update | 2026-05-06 (Phase 6b — engine probes) |
+| Test baseline | backend pytest **241 / 241** · mypy 18 src files · ruff clean · frontend lint+build green · e2e **4 / 4** |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
 HEAD on main` and `Last update` lines are updated at the end of every batch
@@ -52,7 +52,7 @@ once `command git push origin main` returns and CI is green.
 > Make the gain measurable with a head-to-head benchmark.
 
 - [x] **6a** — regenerate `sites.json` from `soxoj/maigret` upstream (3,154 raw → 2,506 active; auto-import `identityTypes` on 8 sites)
-- [ ] **6b** — engine-aware probe heuristics (XenForo / Discourse / vBulletin / uCoz)
+- [x] **6b** — engine-aware probe heuristics (XenForo / Discourse / vBulletin / uCoz) + `engine_probes.py` + 13 tests
 - [ ] **6c** — head-to-head benchmark vs `soxoj/maigret` CLI (precision / recall / p95 / BLOCKED-rescue rate)
 - [ ] **6d** — PDF export (resurrected from Phase 5b deferral)
 
