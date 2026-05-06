@@ -11,12 +11,12 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 
 | Field | Value |
 | --- | --- |
-| Repo HEAD on main | `<pending push>` (Phase 5h-A/B/C — confidence + ML + verify floors) |
+| Repo HEAD on main | `<pending push>` (Phase 5h-D part 1 — link-liveness scaffold) |
 | HF Space HEAD | `d5b2dac` (mirrors `853b7cc`) |
-| Active batch | **Phase 5h Layer D** (post-claim link-liveness probe) |
-| Last batch shipped | Phase 5h-A/B/C — claimed precision floor as admin knobs |
-| Last update | 2026-05-06 (Batch 1 — claimed precision floor) |
-| Test baseline | backend pytest **217 / 217** · mypy 17 src files · ruff clean · frontend lint+build green · e2e 3 / 3 |
+| Active batch | **Phase 5h Layer D — part 2** (Layer D unit tests; new file `backend/tests/test_link_liveness.py`) |
+| Last batch shipped | Phase 5h-D part 1 — `_link_liveness_probe()` + `enable_link_liveness` knob (no Layer D unit tests yet; existing 217 / 217 pytest still green via legacy disable-fixture) |
+| Last update | 2026-05-06 (Batch 2 part 1 — link-liveness scaffold) |
+| Test baseline | backend pytest **217 / 217** · mypy 17 src files · ruff clean · frontend lint+build green · e2e 3 / 3 (Layer D adds ~7 cases in part 2) |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
 HEAD on main` and `Last update` lines are updated at the end of every batch

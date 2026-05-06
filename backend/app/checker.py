@@ -87,6 +87,182 @@ def _admin_int(key: str) -> int:
         return int(getattr(settings, spec.settings_attr))
 
 
+# ---------------------------------------------------------------------------
+# Phase 5h Layer D — post-claim link-liveness probe.
+#
+# The display URL the SPA renders is sometimes different from the URL the
+# checker probes (``site.url`` vs ``site.url_probe``). Even when probes
+# pass, the display URL may be 404, redirect to a login wall, or redirect
+# to the site homepage with ``?missing=true``. These patterns are stable
+# across hundreds of sites in the catalog so a small set of substrings
+# captures the bulk of "claimed but link is dead" cases without per-site
+# tuning.
+# ---------------------------------------------------------------------------
+
+# Substrings that indicate the redirected URL is not a real profile page.
+# Matched case-insensitively against the final URL's path component only;
+# real profile URLs embed the username so these tokens shouldn't appear
+# on a healthy CLAIMED page.
+_LINK_LIVENESS_DEAD_PATH_TOKENS: tuple[str, ...] = (
+    "/login",
+    "/signin",
+    "/sign-in",
+    "/signup",
+    "/sign-up",
+    "/register",
+    "/auth/",
+    "/oauth/",
+    "/sso/",
+    "/users/sign_in",
+    "/account/login",
+    "/account/signin",
+    "/404",
+    "/not-found",
+    "/notfound",
+    "/page-not-found",
+    "/page_not_found",
+    "/error",
+    "/missing",
+    "/deactivated",
+    "/deleted",
+    "/suspended",
+)
+# Substrings indicating a homepage-with-flag soft-404 (``?missing=true``,
+# ``?error=usernotfound``, etc.). Matched case-insensitively against the
+# final URL's query string.
+_LINK_LIVENESS_DEAD_QUERY_TOKENS: tuple[str, ...] = (
+    "missing=true",
+    "missing=1",
+    "deleted=true",
+    "deleted=1",
+    "redirect=login",
+    "error=usernotfound",
+    "notfound=1",
+)
+
+
+def _final_url_after_redirects(resp: httpx.Response) -> str:
+    """Return the final URL of a (possibly redirected) httpx response."""
+    return str(resp.url)
+
+
+def _link_liveness_demote_reason(resp: httpx.Response, site: Site) -> str | None:
+    """Inspect a final response and return a demote reason or ``None``.
+
+    Demote signals (any one is sufficient):
+
+    * ``link-dead-after-claim``    — final status 404 / 410.
+    * ``link-redirects-home``      — final URL host matches ``url_main``
+      and the path is empty / ``/`` / ``/index`` / ``/home``, or the
+      query string contains a known soft-404 token.
+    * ``link-redirects-login``     — final URL path matches a known
+      login / signup / not-found / deactivated token.
+    """
+    if resp.status_code in (404, 410):
+        return f"link-dead-after-claim:{resp.status_code}"
+
+    final_url = httpx.URL(_final_url_after_redirects(resp))
+    final_path = (final_url.path or "/").lower()
+    final_query = (final_url.query or b"").decode("ascii", errors="ignore").lower()
+
+    for token in _LINK_LIVENESS_DEAD_PATH_TOKENS:
+        if token in final_path:
+            return f"link-redirects-login:{token}"
+
+    if any(token in final_query for token in _LINK_LIVENESS_DEAD_QUERY_TOKENS):
+        return "link-redirects-home:soft-404-flag"
+
+    # Homepage redirect detection: if the final host matches the site's
+    # canonical host *and* the final path is just the root, the user
+    # redirect collapsed to the homepage (a strong "user gone" signal).
+    try:
+        url_main = httpx.URL(site.url_main)
+    except httpx.InvalidURL:
+        return None
+    if final_url.host == url_main.host and final_path in (
+        "",
+        "/",
+        "/index",
+        "/home",
+        "/index.html",
+    ):
+        return "link-redirects-home:root"
+
+    return None
+
+
+async def _link_liveness_probe(
+    client: httpx.AsyncClient,
+    primary: CheckResult,
+    site: Site,
+) -> CheckResult:
+    """Phase 5h Layer D — HEAD/GET the display URL and demote dead links.
+
+    The probe is a no-op when ``enable_link_liveness`` is disabled, when
+    the row isn't CLAIMED, or when ``primary.url`` is empty. On any
+    network error or anti-bot block (429 / 451 / blocked body) the
+    probe is *fail-open*: it adds a ``link-liveness-error`` /
+    ``link-liveness-blocked`` signal but doesn't demote — we'd rather
+    keep a possibly-real claim than demote it because Cloudflare didn't
+    let us check.
+
+    A successful liveness check appends ``link-verified-live`` so the
+    SPA can render a green badge.
+    """
+    if _admin_int("enable_link_liveness") != 1:
+        return primary
+    if primary.status is not Status.CLAIMED:
+        return primary
+    if not primary.url:
+        return primary
+
+    timeout = settings.link_liveness_timeout
+    headers = {"User-Agent": _ALT_USER_AGENT}
+
+    resp: httpx.Response | None = None
+    try:
+        resp = await client.head(
+            primary.url,
+            headers=headers,
+            follow_redirects=True,
+            timeout=timeout,
+        )
+        # Some sites reject HEAD with 405 / 501 — retry with GET.
+        if resp.status_code in (405, 501):
+            resp = await client.get(
+                primary.url,
+                headers=headers,
+                follow_redirects=True,
+                timeout=timeout,
+            )
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
+        primary.signals = [*primary.signals, f"link-liveness-error:{type(e).__name__}"]
+        return primary
+
+    # Anti-bot: fail open. We don't trust the result either way; better
+    # to keep the claim than demote because of a WAF.
+    body_for_block_check = ""
+    if resp.request.method == "GET":
+        try:
+            body_for_block_check = resp.text or ""
+        except Exception:
+            body_for_block_check = ""
+    if resp.status_code in (429, 451) or (
+        body_for_block_check and _is_blocked_body(body_for_block_check)
+    ):
+        primary.signals = [*primary.signals, f"link-liveness-blocked:{resp.status_code}"]
+        return primary
+
+    reason = _link_liveness_demote_reason(resp, site)
+    if reason is not None:
+        primary.signals = [*primary.signals, reason]
+        primary.status = Status.UNKNOWN
+        return primary
+
+    primary.signals = [*primary.signals, "link-verified-live"]
+    return primary
+
+
 def _apply_claimed_precision_floor(primary: CheckResult) -> CheckResult:
     """Phase 5h Layer A+B+C — demote borderline CLAIMED rows to UNKNOWN.
 
@@ -753,6 +929,10 @@ async def check_site(
     # sees the verify-adjusted confidence and the ML reranker's score;
     # demotes borderline hits to UNKNOWN before they leave the checker.
     primary = _apply_claimed_precision_floor(primary)
+    # Phase 5h Layer D — link-liveness probe. Only runs when the row is
+    # still CLAIMED after the precision floor (the floor's a cheap
+    # short-circuit).
+    primary = await _link_liveness_probe(client, primary, site)
     return primary
 
 

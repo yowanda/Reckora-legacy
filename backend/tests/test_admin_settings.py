@@ -171,6 +171,8 @@ def test_public_settings_returns_effective_map(
     assert data["min_claimed_confidence"] == 60
     assert data["min_claimed_ml_confidence"] == 50
     assert data["require_verify_for_claim"] == 0
+    # Phase 5h Layer D — link-liveness probe enabled by default.
+    assert data["enable_link_liveness"] == 1
 
 
 def test_public_settings_requires_auth(client: TestClient) -> None:

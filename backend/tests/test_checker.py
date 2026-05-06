@@ -31,6 +31,7 @@ def _disable_phase_5h_floors_for_legacy_tests(monkeypatch: pytest.MonkeyPatch) -
             "min_claimed_confidence",
             "min_claimed_ml_confidence",
             "require_verify_for_claim",
+            "enable_link_liveness",
         }:
             return 0
         return real_admin_int(key)
@@ -474,6 +475,7 @@ _PHASE_5H_KNOBS = {
     "min_claimed_confidence",
     "min_claimed_ml_confidence",
     "require_verify_for_claim",
+    "enable_link_liveness",
 }
 
 

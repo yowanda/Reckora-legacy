@@ -104,6 +104,18 @@ class Settings(BaseSettings):
     min_claimed_confidence: int = 60
     min_claimed_ml_confidence: int = 50  # 0-100, mapped to 0.0-1.0
     require_verify_for_claim: int = 0  # 1 = strict (verify must agree)
+    # Phase 5h Layer D: post-claim link-liveness probe.
+    #
+    # After every CLAIMED row survives the precision floor, do one
+    # extra HEAD/GET on the human-facing display URL (post username
+    # substitution). Demote when the URL is dead, redirected to the
+    # site homepage, redirected to a login/signup wall, or looks like
+    # a soft-404. Disabling this knob skips the extra probe — useful
+    # behind a heavily rate-limited egress where every claim already
+    # costs 2-3 requests via verify + ML.
+    enable_link_liveness: int = 1
+    # Short timeout — the claim itself already paid for the slow path.
+    link_liveness_timeout: float = 4.0
 
 
 settings = Settings()

@@ -151,6 +151,21 @@ KNOBS: tuple[KnobSpec, ...] = (
             "demoted to UNKNOWN. Use this for zero-FP operator runs."
         ),
     ),
+    KnobSpec(
+        key="enable_link_liveness",
+        settings_attr="enable_link_liveness",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 5h Layer D: when 1, every CLAIMED hit gets one "
+            "extra HEAD/GET on the human-facing ``url`` (post-"
+            "substitution). Hits that 404 / 410, redirect to the site "
+            "homepage, redirect to a login wall, or look like a soft-"
+            "404 are demoted to UNKNOWN. Disabling skips the extra "
+            "probe — useful when running behind a heavily rate-"
+            "limited egress."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}
