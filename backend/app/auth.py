@@ -117,6 +117,41 @@ def init_db() -> None:
                 id      INTEGER PRIMARY KEY CHECK (id = 1),
                 secret  TEXT NOT NULL
             );
+
+            -- Phase 4: admin-managed live overrides on top of the bundled
+            -- ``sites.json``. ``operation`` is one of upsert/delete/disable;
+            -- ``patch_json`` carries the raw site definition (or partial
+            -- patch) merged onto the base catalog at runtime.
+            CREATE TABLE IF NOT EXISTS site_overrides (
+                name        TEXT PRIMARY KEY COLLATE NOCASE,
+                operation   TEXT NOT NULL CHECK(operation IN ('upsert','delete','disable')),
+                patch_json  TEXT NOT NULL,
+                created_by  TEXT NOT NULL,
+                created_at  INTEGER NOT NULL,
+                updated_at  INTEGER NOT NULL
+            );
+
+            -- Phase 4: per-member scan history. ``results_json`` is a
+            -- compact JSON array of {site, status, confidence, ml_confidence,
+            -- url} tuples; the full result payload is intentionally NOT
+            -- kept (storage cost is bounded at ~3 KB per scan).
+            CREATE TABLE IF NOT EXISTS scans (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                member       TEXT NOT NULL COLLATE NOCASE,
+                username     TEXT NOT NULL,
+                mode         TEXT NOT NULL CHECK(mode IN ('list','graph')),
+                started_at   INTEGER NOT NULL,
+                finished_at  INTEGER NOT NULL,
+                site_count   INTEGER NOT NULL,
+                claimed      INTEGER NOT NULL,
+                free         INTEGER NOT NULL,
+                blocked      INTEGER NOT NULL,
+                unknown      INTEGER NOT NULL,
+                error_count  INTEGER NOT NULL,
+                results_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_scans_member_username
+                ON scans(member, username, finished_at DESC);
             """
         )
 

@@ -16,7 +16,10 @@ Pulled directly from the source trees:
 | Sites | **2,506 curated sites** *derived* from Maigret’s DB (`backend/scripts/build_sites.py`, MIT). | 3,154 native sites + 13 shared engines. |
 | Identity types | usernames only (`a-zA-Z0-9._-`, length 1–64). | usernames, emails, GAIA IDs, phones, Yandex IDs, … (`--id-type`), plus URL parsing & permutation. |
 | Recursive enrichment | **yes** (Phase 3) — `socid_extractor` integration on every CLAIMED hit (61 % of CLAIMED yield identifiers), depth-1 graph recursion, **edges + extracted events emitted on the SSE stream**. Bounded fanout (≤ 8 seed hits × ≤ 5 secondary). | yes — extracts other IDs from profile pages and re-scans, no fanout cap by default. |
-| Reporting | **streamed JSON + interactive react-flow graph view** (consumer renders cards or graph in-browser). | TXT, CSV, HTML, JSON, Markdown, PDF, XMind, Graph (PyVis), AI summary. |
+| Confidence scoring | **0–100 rule score + complementary 0–100 ML score** (Phase 4, bundled ONNX, ~9 ms / probe overhead). `ml-disagree` signal flags rule/ML disagreements for the operator. | binary CLAIMED/AVAILABLE/UNKNOWN; no probability surface. |
+| Site catalog editing | **live admin DB editor** (Phase 4) — `POST /api/admin/sites` upserts/disables/deletes the bundled `sites.json` at runtime via SQLite `site_overrides`. Hot reload, no rebuild. | edit `data.json` in the package on disk; `--self-check` / `--auto-disable`. |
+| Scan history & diff | **per-member persisted history** (Phase 4) — last 50 scans / member / username, `GET /api/history/diff/{a}/{b}` returns newly_claimed / no_longer_claimed / status_changed / confidence_shift. | none — CLI is stateless across runs. |
+| Reporting | **streamed JSON + interactive react-flow graph view + admin-side history diff viewer** (consumer renders cards or graph in-browser). | TXT, CSV, HTML, JSON, Markdown, PDF, XMind, Graph (PyVis), AI summary. |
 | Auth | mandatory members-only login (admin-managed). | none (it’s a local CLI). |
 | Deploy target | one Docker image → HF Space / Fly.io. | `pip install maigret`, plus a Docker stage for the optional web UI. |
 | Async runtime | `httpx.AsyncClient` + asyncio task pool. | `aiohttp` + a custom `CheckerBase` hierarchy (incl. cloudscraper / curl-cffi for WAF-evading runs). |

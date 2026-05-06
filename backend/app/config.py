@@ -54,6 +54,24 @@ class Settings(BaseSettings):
     graph_max_depth: int = 1
     graph_max_secondary: int = 5
     graph_max_seed_hits: int = 8
+    # Phase 4: ML-confidence classifier. Disable to drop the
+    # onnxruntime cost entirely; the rule-based classifier remains
+    # untouched. The threshold below picks borderline rule-based
+    # CLAIMED/FREE results for which the SPA shows an ``ml-disagree``
+    # signal when the model disagrees by ≥ this many points.
+    enable_ml_confidence: bool = True
+    ml_disagree_threshold: int = 30
+    # Phase 4: site-overrides editor. When True the admin DB editor
+    # endpoints are exposed; the merged catalog (sites.json + overrides
+    # table) is what the runtime probes. Setting to False reverts to
+    # phase-3 behaviour where ``sites.json`` is authoritative.
+    enable_site_overrides: bool = True
+    # Phase 4: per-member scan history. Each finished /api/search +
+    # /api/search/graph stream is recorded so members can diff scans
+    # later. ``scan_history_max_per_user`` is the rolling window we
+    # keep — older scans are pruned on insert.
+    enable_scan_history: bool = True
+    scan_history_max_per_user: int = 50
 
 
 settings = Settings()

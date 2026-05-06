@@ -49,6 +49,17 @@ export function ResultCard({ r }: { r: CheckResult }) {
             {typeof r.confidence === 'number' && r.status !== 'skipped' && (
               <ConfidenceBadge value={r.confidence} status={r.status} />
             )}
+            {typeof r.ml_confidence === 'number' && r.status !== 'skipped' && (
+              <MlBadge value={r.ml_confidence} ruleConfidence={r.confidence} status={r.status} />
+            )}
+            {r.signals?.some((s) => s.startsWith('ml-disagree:')) && (
+              <span
+                className="chip border border-warn/40 bg-warn/10 !py-0 text-[10px] text-warn"
+                title="Phase 4 ML model disagrees with the rule-based classifier — manual review suggested."
+              >
+                ! ml-disagree
+              </span>
+            )}
             {r.verified === true && (
               <span
                 className="chip border border-ok/40 bg-ok/10 !py-0 text-[10px] text-ok"
@@ -136,6 +147,42 @@ function ConfidenceBadge({ value, status }: { value: number; status: Status }) {
       title={`Confidence ${value}/100`}
     >
       {value}
+    </span>
+  )
+}
+
+function MlBadge({
+  value,
+  ruleConfidence,
+  status,
+}: {
+  value: number
+  ruleConfidence?: number
+  status: Status
+}) {
+  // Phase 4: indigo-tinted complement to the rule-confidence chip. The
+  // model is independent of the rule classifier, so showing both makes
+  // disagreements obvious without forcing one to win.
+  const tone =
+    status === 'claimed'
+      ? value >= 70
+        ? 'text-indigo-300'
+        : 'text-warn'
+      : status === 'free'
+        ? value <= 30
+          ? 'text-indigo-300'
+          : 'text-warn'
+        : 'text-indigo-300'
+  const title =
+    typeof ruleConfidence === 'number'
+      ? `ML probability ${value}/100 (rule ${ruleConfidence}/100)`
+      : `ML probability ${value}/100`
+  return (
+    <span
+      className={`chip border border-indigo-500/30 bg-indigo-500/5 !py-0 font-mono text-[10px] ${tone}`}
+      title={title}
+    >
+      ml {value}
     </span>
   )
 }

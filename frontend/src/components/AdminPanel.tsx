@@ -2,8 +2,67 @@ import { useEffect, useMemo, useState } from 'react'
 import { createMember, deleteMember, listMembers, patchMember } from '../api'
 import { useAuth } from '../auth-context'
 import { ApiError, type Member, type Role } from '../types'
+import { HistoryView } from './HistoryView'
+import { SitesEditor } from './SitesEditor'
+
+type AdminTab = 'members' | 'sites' | 'history'
 
 export function AdminPanel() {
+  const [tab, setTab] = useState<AdminTab>('members')
+
+  return (
+    <section className="mx-auto mt-8 max-w-5xl space-y-6">
+      <header>
+        <h2 className="text-xl font-semibold tracking-tight">Admin</h2>
+        <p className="mt-1 text-sm text-zinc-400">
+          Manage members, the site catalog, and your scan history. Phase 4.
+        </p>
+      </header>
+
+      <nav className="flex gap-1 border-b border-zinc-800 text-sm">
+        <TabButton active={tab === 'members'} onClick={() => setTab('members')}>
+          Members
+        </TabButton>
+        <TabButton active={tab === 'sites'} onClick={() => setTab('sites')}>
+          Sites
+        </TabButton>
+        <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
+          History
+        </TabButton>
+      </nav>
+
+      {tab === 'members' && <MembersTab />}
+      {tab === 'sites' && <SitesEditor />}
+      {tab === 'history' && <HistoryView />}
+    </section>
+  )
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={
+        'rounded-t px-3 py-2 transition ' +
+        (active
+          ? 'border-b-2 border-accent text-accent'
+          : 'text-zinc-400 hover:text-zinc-200')
+      }
+    >
+      {children}
+    </button>
+  )
+}
+
+function MembersTab() {
   const { member: me } = useAuth()
   const [members, setMembers] = useState<Member[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -105,14 +164,11 @@ export function AdminPanel() {
   )
 
   return (
-    <section className="mx-auto mt-8 max-w-4xl space-y-6">
-      <header>
-        <h2 className="text-xl font-semibold tracking-tight">Member management</h2>
-        <p className="mt-1 text-sm text-zinc-400">
-          Add, remove, and reset passwords for Reckora members. Members can search; only admins
-          can manage other members.
-        </p>
-      </header>
+    <div className="space-y-4">
+      <p className="text-xs text-zinc-400">
+        Add, remove, and reset passwords for Reckora members. Members can search; only admins can
+        manage other members.
+      </p>
 
       {error && (
         <div className="card border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad">{error}</div>
@@ -294,7 +350,7 @@ export function AdminPanel() {
           </form>
         </div>
       )}
-    </section>
+    </div>
   )
 }
 

@@ -78,6 +78,13 @@ class CheckResult:
     # didn't run (status wasn't CLAIMED, body unavailable, or confidence
     # too low). ``{}`` = ran but the page yielded no recognised fields.
     extracted: dict[str, str] | None = None
+    # Phase 4: supplemental ML confidence (probability that the result
+    # is CLAIMED, mapped to 0-100). ``None`` means the model wasn't
+    # consulted (disabled in config, model file missing, SKIPPED result,
+    # or onnxruntime failure). The rule-based ``confidence`` remains
+    # authoritative; ``ml_confidence`` is shown side-by-side in the SPA
+    # and a diverging value adds a ``ml-disagree`` signal.
+    ml_confidence: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -94,6 +101,7 @@ class CheckResult:
             "attempts": self.attempts,
             "verified": self.verified,
             "extracted": self.extracted,
+            "ml_confidence": self.ml_confidence,
         }
 
 
@@ -588,6 +596,40 @@ async def check_site(
             primary.extracted = extract_identifiers(body, primary.url)
         except Exception:  # pragma: no cover - extractor must never break a scan
             primary.extracted = {}
+    # Phase 4: ML confidence. Skipped when the rule-based classifier
+    # opted out (SKIPPED) or when extract+verify already concluded the
+    # answer doesn't matter. We score every other status because the
+    # SPA needs a comparable second-opinion number even on UNKNOWN /
+    # BLOCKED rows.
+    if primary.status is not Status.SKIPPED and settings.enable_ml_confidence:
+        from . import ml as _ml
+
+        try:
+            primary.ml_confidence = _ml.score(
+                site,
+                http_status=primary.http_status,
+                body=body,
+                elapsed_ms=primary.elapsed_ms,
+            )
+        except Exception:  # pragma: no cover - ml must never break a scan
+            primary.ml_confidence = None
+        if primary.ml_confidence is not None:
+            ml = primary.ml_confidence
+            rule = primary.confidence
+            disagree_threshold = settings.ml_disagree_threshold
+            if (
+                primary.status is Status.CLAIMED
+                and rule >= 70
+                and ml <= rule - disagree_threshold
+            ):
+                primary.signals = [*primary.signals, f"ml-disagree:claimed-{ml}"]
+            elif (
+                primary.status is Status.FREE
+                and rule >= 70
+                and ml >= rule  # ml predicts CLAIMED while rules say FREE
+                and (ml - (100 - rule)) >= disagree_threshold
+            ):
+                primary.signals = [*primary.signals, f"ml-disagree:free-{ml}"]
     return primary
 
 

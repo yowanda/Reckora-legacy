@@ -1,10 +1,16 @@
 import { ApiError } from './types'
 import type {
+  AdminSiteEntry,
+  AdminSitesResponse,
   CheckResult,
   GraphEdge,
   GraphExtracted,
   Member,
   Role,
+  ScanDetail,
+  ScanDiff,
+  ScanSummary,
+  SiteRaw,
   SitesResponse,
 } from './types'
 
@@ -164,6 +170,65 @@ export async function streamSearch(
     }
   }
   if (buffer.trim()) handleSseChunk(buffer, events)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: admin DB editor (live site catalog overrides)
+// ---------------------------------------------------------------------------
+
+export async function adminListSites(): Promise<AdminSitesResponse> {
+  return jsonFetch<AdminSitesResponse>('/api/admin/sites')
+}
+
+export async function adminGetSite(name: string): Promise<AdminSiteEntry> {
+  return jsonFetch<AdminSiteEntry>(`/api/admin/sites/${encodeURIComponent(name)}`)
+}
+
+export async function adminUpsertSite(payload: {
+  name: string
+  operation: 'upsert' | 'delete' | 'disable'
+  patch: Partial<SiteRaw>
+}): Promise<{ ok: boolean; site: AdminSiteEntry | null; catalog_size: number }> {
+  return jsonFetch('/api/admin/sites', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function adminRemoveOverride(name: string): Promise<void> {
+  await jsonFetch<void>(`/api/admin/sites/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
+export async function adminReloadCatalog(): Promise<{ ok: boolean; sites: number }> {
+  return jsonFetch('/api/admin/sites/reload', { method: 'POST' })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: scan history (per-member, with diff)
+// ---------------------------------------------------------------------------
+
+export async function listHistory(filter?: {
+  username?: string
+  limit?: number
+}): Promise<ScanSummary[]> {
+  const qs = new URLSearchParams()
+  if (filter?.username) qs.set('username', filter.username)
+  if (filter?.limit) qs.set('limit', String(filter.limit))
+  const path = qs.toString() ? `/api/history?${qs.toString()}` : '/api/history'
+  const body = await jsonFetch<{ scans: ScanSummary[] }>(path)
+  return body.scans
+}
+
+export async function getHistoryScan(scanId: number): Promise<ScanDetail> {
+  return jsonFetch<ScanDetail>(`/api/history/${scanId}`)
+}
+
+export async function deleteHistoryScan(scanId: number): Promise<void> {
+  await jsonFetch<void>(`/api/history/${scanId}`, { method: 'DELETE' })
+}
+
+export async function diffHistory(fromId: number, toId: number): Promise<ScanDiff> {
+  return jsonFetch<ScanDiff>(`/api/history/diff/${fromId}/${toId}`)
 }
 
 function handleSseChunk(chunk: string, events: SearchEvents | GraphSearchEvents) {

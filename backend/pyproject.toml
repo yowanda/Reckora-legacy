@@ -26,6 +26,12 @@ dependencies = [
     "curl-cffi>=0.7.0",
     # Phase 3: profile-identity extraction from CLAIMED page bodies.
     "socid-extractor>=0.0.28",
+    # Phase 4: lightweight ML classifier (LogisticRegression exported to
+    # ONNX at training time, evaluated at runtime via onnxruntime). The
+    # repo ships the pre-trained model as a binary asset so the runtime
+    # never needs scikit-learn — only training does.
+    "onnxruntime>=1.18.0",
+    "numpy>=1.26.0",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +41,9 @@ dev = [
     "pytest-httpx>=0.30.0",
     "ruff>=0.6.0",
     "mypy>=1.11.0",
+    # Phase 4: ML training only. Not installed in the production runtime.
+    "scikit-learn>=1.4.0",
+    "skl2onnx>=1.17.0",
 ]
 
 [build-system]
@@ -57,6 +66,9 @@ ignore = ["E501", "B008"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B017", "ARG001", "RUF100"]
+# Training scripts use sklearn convention (X for matrix, y for target)
+# and lazily import the local app package after a sys.path tweak.
+"scripts/train_ml.py" = ["E402", "F841", "N806"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

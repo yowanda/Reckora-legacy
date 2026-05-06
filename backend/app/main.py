@@ -19,6 +19,8 @@ from slowapi.util import get_remote_address
 
 from . import __version__
 from . import auth as auth_mod
+from . import history as history_mod
+from . import site_overrides as overrides_mod
 from .auth import (
     SESSION_COOKIE,
     SESSION_TTL_SECONDS,
@@ -27,7 +29,7 @@ from .auth import (
 from .cache import TTLCache
 from .checker import is_valid_username, stream_checks
 from .config import settings
-from .sites import SiteCatalog, load_catalog
+from .sites import SiteCatalog, load_catalog, reload_catalog, site_to_raw
 
 logger = logging.getLogger("reckora")
 
@@ -337,7 +339,12 @@ def _sse_event(event: str, payload: dict[str, Any]) -> bytes:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
 
-async def _search_stream(req: SearchRequest, catalog: SiteCatalog) -> AsyncIterator[bytes]:
+async def _search_stream(
+    req: SearchRequest,
+    catalog: SiteCatalog,
+    *,
+    member: Member | None = None,
+) -> AsyncIterator[bytes]:
     sites = catalog.filtered(tags=req.tags, limit=req.limit)
     yield _sse_event("start", {"username": req.username, "total": len(sites)})
 
@@ -358,6 +365,7 @@ async def _search_stream(req: SearchRequest, catalog: SiteCatalog) -> AsyncItera
         yield _sse_event("done", {"results": len(cached), "cached": True})
         return
 
+    started_at = history_mod.now_unix()
     collected: list[dict[str, Any]] = []
     # Phase 1: enable HTTP/2 (httpx[http2] -> h2). Saves ~1 RTT per host on
     # warm pools and is widely deployed across CMS-hosted sites. brotli is
@@ -377,7 +385,21 @@ async def _search_stream(req: SearchRequest, catalog: SiteCatalog) -> AsyncItera
             yield _sse_event("result", payload)
 
     cache.set(cache_key, collected)
-    yield _sse_event("done", {"results": len(collected), "cached": False})
+    scan_id: int | None = None
+    if member is not None:
+        scan_id = history_mod.record_scan(
+            member=member.username,
+            username=req.username,
+            mode="list",
+            started_at=started_at,
+            finished_at=history_mod.now_unix(),
+            site_count=len(sites),
+            results=collected,
+        )
+    yield _sse_event(
+        "done",
+        {"results": len(collected), "cached": False, "scan_id": scan_id},
+    )
 
 
 @app.post("/api/search")
@@ -386,12 +408,12 @@ async def search(
     request: Request,
     body: SearchRequest,
     catalog: SiteCatalog = Depends(get_catalog),
-    _: Member = Depends(current_member),
+    member: Member = Depends(current_member),
 ) -> StreamingResponse:
     if not catalog.sites:
         raise HTTPException(503, "site catalog unavailable")
     return StreamingResponse(
-        _search_stream(body, catalog),
+        _search_stream(body, catalog, member=member),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
@@ -420,6 +442,8 @@ class GraphSearchRequest(SearchRequest):
 async def _graph_search_stream(
     req: GraphSearchRequest,
     catalog: SiteCatalog,
+    *,
+    member: Member | None = None,
 ) -> AsyncIterator[bytes]:
     sites = catalog.filtered(tags=req.tags, limit=req.limit)
     yield _sse_event(
@@ -440,6 +464,7 @@ async def _graph_search_stream(
     )
     effective_depth = min(req.depth, settings.graph_max_depth)
 
+    started_at = history_mod.now_unix()
     primary_results: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     discovered: dict[str, str] = {}  # child_username -> source description
@@ -525,13 +550,26 @@ async def _graph_search_stream(
                     sub_payload["parent_username"] = child_username
                     sub_payload["discovered_via"] = parent_username
                     yield _sse_event("result", sub_payload)
+                    primary_results.append(sub_payload)
 
+    scan_id: int | None = None
+    if member is not None:
+        scan_id = history_mod.record_scan(
+            member=member.username,
+            username=req.username,
+            mode="graph",
+            started_at=started_at,
+            finished_at=history_mod.now_unix(),
+            site_count=len(sites),
+            results=primary_results,
+        )
     yield _sse_event(
         "done",
         {
             "results": len(primary_results),
             "edges": len(edges),
             "secondary_count": len(discovered),
+            "scan_id": scan_id,
         },
     )
 
@@ -542,12 +580,12 @@ async def search_graph(
     request: Request,
     body: GraphSearchRequest,
     catalog: SiteCatalog = Depends(get_catalog),
-    _: Member = Depends(current_member),
+    member: Member = Depends(current_member),
 ) -> StreamingResponse:
     if not catalog.sites:
         raise HTTPException(503, "site catalog unavailable")
     return StreamingResponse(
-        _graph_search_stream(body, catalog),
+        _graph_search_stream(body, catalog, member=member),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
@@ -555,6 +593,208 @@ async def search_graph(
             "Connection": "keep-alive",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: admin live DB editor — site overrides on top of the bundled
+# sites.json. Edits are persisted in the ``site_overrides`` SQLite table
+# and merged into the runtime catalog by ``sites.load_catalog``. After
+# every mutation we drop the cached catalog so the next probe sees the
+# new state without a server restart.
+# ---------------------------------------------------------------------------
+
+
+class SiteUpsert(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    operation: str = Field(default="upsert")
+    patch: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("operation")
+    @classmethod
+    def _val_op(cls, v: str) -> str:
+        if v not in overrides_mod.ALLOWED_OPS:
+            raise ValueError(f"operation must be one of {sorted(overrides_mod.ALLOWED_OPS)}")
+        return v
+
+
+def _serialise_site_for_admin(site: Any) -> dict[str, Any]:
+    """Project a runtime ``Site`` to the admin-API JSON shape."""
+    return {
+        "name": site.name,
+        "source": site.source,
+        "disabled": site.disabled,
+        "engine": site.engine,
+        "tags": list(site.tags),
+        "raw": site_to_raw(site),
+    }
+
+
+@app.get("/api/admin/sites")
+async def admin_list_sites(_: Member = Depends(current_admin)) -> dict[str, Any]:
+    """Return the merged runtime catalog (base + overrides) annotated
+    with each site's provenance."""
+    if not settings.enable_site_overrides:
+        raise HTTPException(404, "site overrides disabled")
+    catalog = load_catalog()
+    overrides = {o.name.lower(): o for o in overrides_mod.list_overrides()}
+    sites: list[dict[str, Any]] = []
+    for s in catalog.sites:
+        entry = _serialise_site_for_admin(s)
+        ov = overrides.get(s.name.lower())
+        if ov is not None:
+            entry["override"] = ov.to_dict()
+        sites.append(entry)
+    return {
+        "sites": sites,
+        "total": len(sites),
+        "custom_count": sum(1 for s in catalog.sites if s.source == "custom"),
+        "overridden_count": sum(1 for s in catalog.sites if s.source == "override"),
+        "disabled_count": sum(1 for s in catalog.sites if s.disabled),
+    }
+
+
+@app.get("/api/admin/sites/{name}")
+async def admin_get_site(
+    name: str,
+    _: Member = Depends(current_admin),
+) -> dict[str, Any]:
+    if not settings.enable_site_overrides:
+        raise HTTPException(404, "site overrides disabled")
+    catalog = load_catalog()
+    site = catalog.by_name(name)
+    if site is None:
+        raise HTTPException(404, "site not found")
+    entry = _serialise_site_for_admin(site)
+    ov = overrides_mod.get_override(name)
+    if ov is not None:
+        entry["override"] = ov.to_dict()
+    return entry
+
+
+@app.post("/api/admin/sites", status_code=201)
+async def admin_upsert_site(
+    body: SiteUpsert,
+    member: Member = Depends(current_admin),
+) -> dict[str, Any]:
+    if not settings.enable_site_overrides:
+        raise HTTPException(404, "site overrides disabled")
+    try:
+        clean_patch = overrides_mod.sanitize_patch(body.patch)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    if body.operation == "upsert":
+        # ``url`` must be templated for new sites; for existing sites we
+        # let the merge keep the base url unless the patch overrides it.
+        catalog = load_catalog()
+        is_new = catalog.by_name(body.name) is None
+        if is_new and ("{username}" not in str(clean_patch.get("url", ""))):
+            raise HTTPException(400, "new sites require a url with `{username}` placeholder")
+    overrides_mod.upsert_override(
+        name=body.name,
+        operation=body.operation,  # type: ignore[arg-type]
+        patch=clean_patch,
+        actor=member.username,
+    )
+    catalog = reload_catalog()
+    site = catalog.by_name(body.name)
+    return {
+        "ok": True,
+        "name": body.name,
+        "operation": body.operation,
+        "site": _serialise_site_for_admin(site) if site else None,
+        "catalog_size": len(catalog.sites),
+    }
+
+
+@app.delete("/api/admin/sites/{name}")
+async def admin_remove_override(
+    name: str,
+    _: Member = Depends(current_admin),
+) -> dict[str, Any]:
+    """Remove the override (revert to base). To remove a base site, use
+    ``POST /api/admin/sites`` with ``operation='delete'`` instead."""
+    if not settings.enable_site_overrides:
+        raise HTTPException(404, "site overrides disabled")
+    removed = overrides_mod.remove_override(name)
+    if not removed:
+        raise HTTPException(404, "no override found")
+    reload_catalog()
+    return {"ok": True, "name": name}
+
+
+@app.post("/api/admin/sites/reload")
+async def admin_reload_catalog(_: Member = Depends(current_admin)) -> dict[str, Any]:
+    """Force a re-merge of base + overrides. Useful if the bundled
+    sites.json was hot-swapped on disk without a deploy."""
+    if not settings.enable_site_overrides:
+        raise HTTPException(404, "site overrides disabled")
+    catalog = reload_catalog()
+    return {"ok": True, "sites": len(catalog.sites)}
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: per-member scan history.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/history")
+async def history_list(
+    username: str | None = None,
+    limit: int = 50,
+    member: Member = Depends(current_member),
+) -> dict[str, Any]:
+    """List the caller's recent scans, optionally filtered by username."""
+    if not settings.enable_scan_history:
+        raise HTTPException(404, "scan history disabled")
+    if username is not None:
+        username = username.strip()
+        if username and not is_valid_username(username):
+            raise HTTPException(400, "invalid username filter")
+    limit = max(1, min(limit, 200))
+    scans = history_mod.list_scans(member=member.username, username=username, limit=limit)
+    return {"scans": [s.to_dict() for s in scans]}
+
+
+@app.get("/api/history/{scan_id}")
+async def history_get(
+    scan_id: int,
+    member: Member = Depends(current_member),
+) -> dict[str, Any]:
+    if not settings.enable_scan_history:
+        raise HTTPException(404, "scan history disabled")
+    out = history_mod.get_scan(scan_id, member.username)
+    if out is None:
+        raise HTTPException(404, "scan not found")
+    summary, results = out
+    return {"scan": summary.to_dict(), "results": results}
+
+
+@app.delete("/api/history/{scan_id}")
+async def history_delete(
+    scan_id: int,
+    member: Member = Depends(current_member),
+) -> dict[str, Any]:
+    if not settings.enable_scan_history:
+        raise HTTPException(404, "scan history disabled")
+    if not history_mod.delete_scan(scan_id, member.username):
+        raise HTTPException(404, "scan not found")
+    return {"ok": True}
+
+
+@app.get("/api/history/diff/{from_id}/{to_id}")
+async def history_diff(
+    from_id: int,
+    to_id: int,
+    member: Member = Depends(current_member),
+) -> dict[str, Any]:
+    if not settings.enable_scan_history:
+        raise HTTPException(404, "scan history disabled")
+    if from_id == to_id:
+        raise HTTPException(400, "diff requires two distinct scan ids")
+    diff = history_mod.diff_scans(member=member.username, from_id=from_id, to_id=to_id)
+    if diff is None:
+        raise HTTPException(404, "one or both scans not found")
+    return diff
 
 
 _static_dir = settings.static_dir

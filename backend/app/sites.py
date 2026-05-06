@@ -1,10 +1,24 @@
-"""Site definitions loader."""
+"""Site definitions loader.
+
+Phase 4: the runtime catalog is now the merge of the bundled
+``data/sites.json`` (immutable, derived from maigret at build time)
+and the SQLite-backed ``site_overrides`` table populated by admins
+through the live DB editor.
+
+Override semantics:
+- ``operation = upsert`` carries a JSON ``patch`` that's merged on top
+  of the base entry; if the site name doesn't exist in the base, the
+  patch is the full definition.
+- ``operation = delete`` removes the site from the runtime catalog
+  (without touching the bundled JSON).
+- ``operation = disable`` keeps the site visible but flags it as
+  disabled (we drop it from probe sets but list it in /api/admin/sites).
+"""
 from __future__ import annotations
 
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -42,6 +56,14 @@ class Site:
     # automatically by ``build_sites.py`` for engines known to need it
     # (XenForo, vBulletin, uCoz, plus the high-WAF subset).
     prewarm: bool = False
+    # Phase 4: admin-managed disable flag. ``True`` = the runtime hides
+    # the site from probes; the admin DB editor still lists it so it can
+    # be re-enabled. Distinct from "delete" which drops the site
+    # entirely from the merged catalog.
+    disabled: bool = False
+    # Phase 4: provenance — ``base`` = bundled sites.json, ``override``
+    # = upsert patch, ``custom`` = added entirely via admin editor.
+    source: Literal["base", "override", "custom"] = "base"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +80,8 @@ class SiteCatalog:
         wanted = {t.lower() for t in tags or ()}
         out: list[Site] = []
         for s in self.sites:
+            if s.disabled:
+                continue
             if wanted and not ({t.lower() for t in s.tags} & wanted):
                 continue
             out.append(s)
@@ -68,12 +92,14 @@ class SiteCatalog:
     def all_tags(self) -> list[tuple[str, int]]:
         counts: dict[str, int] = {}
         for s in self.sites:
+            if s.disabled:
+                continue
             for t in s.tags:
                 counts[t] = counts.get(t, 0) + 1
         return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
 
-def _coerce_site(name: str, raw: dict) -> Site | None:
+def _coerce_site(name: str, raw: dict, *, source: str = "base") -> Site | None:
     url = raw.get("url")
     if not url or "{username}" not in url:
         return None
@@ -110,18 +136,153 @@ def _coerce_site(name: str, raw: dict) -> Site | None:
         ignore_403=bool(raw.get("ignore403")),
         engine=raw.get("engine"),
         prewarm=bool(raw.get("prewarm")),
+        disabled=bool(raw.get("disabled")),
+        source=source,  # type: ignore[arg-type]
     )
 
 
-@lru_cache(maxsize=1)
-def load_catalog(path: Path | None = None) -> SiteCatalog:
-    p = Path(path) if path else settings.sites_path
-    payload = json.loads(p.read_text(encoding="utf-8"))
+def site_to_raw(site: Site) -> dict:
+    """Inverse of ``_coerce_site`` — for serialising a Site back to the
+    JSON shape used in sites.json + the overrides table."""
+    raw: dict = {
+        "url": site.url,
+        "urlMain": site.url_main,
+        "checkType": site.check_type,
+    }
+    if site.regex_check:
+        raw["regexCheck"] = site.regex_check
+    if site.absence_strs:
+        raw["absenceStrs"] = list(site.absence_strs)
+    if site.presense_strs:
+        raw["presenseStrs"] = list(site.presense_strs)
+    if site.headers:
+        raw["headers"] = dict(site.headers)
+    if site.alexa_rank is not None:
+        raw["alexaRank"] = site.alexa_rank
+    if site.tags:
+        raw["tags"] = list(site.tags)
+    if site.error_strs:
+        raw["errors"] = dict.fromkeys(site.error_strs, "")
+    if site.head_only:
+        raw["requestHeadOnly"] = True
+    if site.ignore_403:
+        raw["ignore403"] = True
+    if site.engine:
+        raw["engine"] = site.engine
+    if site.prewarm:
+        raw["prewarm"] = True
+    if site.disabled:
+        raw["disabled"] = True
+    return raw
+
+
+def _merge_raw(base: dict, patch: dict) -> dict:
+    """Shallow-merge ``patch`` over ``base`` for site definitions.
+
+    Keys present in ``patch`` replace the corresponding base keys; this
+    is intentionally NOT deep-merged so admins can fully replace e.g.
+    ``presenseStrs`` rather than only append to it.
+    """
+    merged = dict(base)
+    for k, v in patch.items():
+        if v is None:
+            merged.pop(k, None)
+        else:
+            merged[k] = v
+    return merged
+
+
+# ---------------------------------------------------------------------------
+# Catalog loader
+# ---------------------------------------------------------------------------
+
+# In-memory cache of the merged catalog. Cleared by ``reload_catalog`` on
+# every admin override mutation so the next request sees the new sites.
+_CACHED_CATALOG: SiteCatalog | None = None
+_CACHED_BASE_PATH: Path | None = None
+
+
+def _load_base(path: Path) -> dict[str, dict]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
     raw_sites = payload.get("sites") or payload
+    return dict(raw_sites)
+
+
+def _apply_overrides(base: dict[str, dict]) -> dict[str, tuple[str, dict]]:
+    """Return ``{site_name: (source, merged_raw_dict)}`` after applying
+    overrides from the SQLite ``site_overrides`` table on top of the
+    bundled base.
+
+    ``source`` is one of ``base`` (no override), ``override`` (base entry
+    patched), or ``custom`` (admin-added entry that doesn't exist in the
+    bundled JSON).
+    """
+    if not settings.enable_site_overrides:
+        return {name: ("base", raw) for name, raw in base.items()}
+
+    # Lazy import to avoid circular auth/sites dependency during startup.
+    from .auth import db_connection
+
+    out: dict[str, tuple[str, dict]] = {name: ("base", raw) for name, raw in base.items()}
+    try:
+        with db_connection() as conn:
+            rows = conn.execute(
+                "SELECT name, operation, patch_json FROM site_overrides ORDER BY updated_at"
+            ).fetchall()
+    except Exception:
+        # Table missing during early startup or test bootstrap — no-op.
+        return out
+
+    for row in rows:
+        name = row["name"]
+        op = row["operation"]
+        patch_json = row["patch_json"] or "{}"
+        try:
+            patch = json.loads(patch_json)
+        except json.JSONDecodeError:
+            continue
+        if op == "delete":
+            out.pop(name, None)
+            continue
+        if op == "disable":
+            base_raw = out.get(name, ("base", {}))[1]
+            out[name] = ("override", {**base_raw, "disabled": True})
+            continue
+        # upsert (or any unknown op falls back to upsert)
+        if name in out:
+            base_raw = out[name][1]
+            out[name] = ("override", _merge_raw(base_raw, patch))
+        else:
+            # Brand-new site added entirely via the editor.
+            out[name] = ("custom", patch)
+    return out
+
+
+def load_catalog(path: Path | None = None) -> SiteCatalog:
+    """Load the merged site catalog (bundled JSON + admin overrides)."""
+    global _CACHED_CATALOG, _CACHED_BASE_PATH
+    p = Path(path) if path else settings.sites_path
+    if _CACHED_CATALOG is not None and p == _CACHED_BASE_PATH:
+        return _CACHED_CATALOG
+
+    base = _load_base(p)
+    merged = _apply_overrides(base)
     sites: list[Site] = []
-    for name, raw in raw_sites.items():
-        s = _coerce_site(name, raw)
+    for name, (source, raw) in merged.items():
+        s = _coerce_site(name, raw, source=source)
         if s:
             sites.append(s)
     sites.sort(key=lambda s: (s.alexa_rank or 10**9, s.name))
-    return SiteCatalog(tuple(sites))
+    catalog = SiteCatalog(tuple(sites))
+    _CACHED_CATALOG = catalog
+    _CACHED_BASE_PATH = p
+    return catalog
+
+
+def reload_catalog() -> SiteCatalog:
+    """Drop the cached catalog and re-merge. Called by the admin DB
+    editor after every mutation so the next probe sees the new state."""
+    global _CACHED_CATALOG, _CACHED_BASE_PATH
+    _CACHED_CATALOG = None
+    _CACHED_BASE_PATH = None
+    return load_catalog()

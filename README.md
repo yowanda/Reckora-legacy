@@ -38,7 +38,7 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 1 — coverage & precision wins | shipped (ed584e4) | **2,506** ↑ from 555 | 0–100 score | yes | — | — | — | — | — |
 | 2 — anti-bot & verify | shipped (bd7b768) | 2,506 | 0–100 | yes | yes (Firefox UA + rotated referrer) | yes (~928 sites) | yes (curl-cffi chrome131) | — | — |
 | 3 — extraction & graph | shipped | 2,506 | 0–100 | yes | yes | yes | yes | **yes (socid_extractor + react-flow)** | — |
-| 4 — beyond maigret | planned | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes | yes (ONNX) + admin live DB editor + scan-history diff |
+| 4 — beyond maigret | shipped | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes | **yes (ONNX) + admin live DB editor + scan-history diff** |
 
 **Phase 1 benchmark — 100-site synthetic scan, no caching, prod HF Space.**
 
@@ -79,6 +79,21 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | SSE payload / 100 sites (list mode) | 32 KB | **35 KB** | 35 KB | +9 % (extracted dict per CLAIMED) |
 | SSE payload / graph scan with 1 sub-scan | n/a | n/a | **81 KB** | primary 35 KB + extracted events 1 KB + secondary 35 KB + chrome 10 KB |
 | Recursion safety caps | n/a | n/a | **depth ≤ 1, max 5 secondary per parent, max 8 seed hits** | bounded fanout; sub-scans skip extraction to keep payload small |
+
+**Phase 4 benchmark — same 100-site scan with the bundled ONNX classifier enabled vs. disabled.**
+
+| Metric | Phase 3 | Phase 4 (ml on) | Δ |
+| --- | --- | --- | --- |
+| 100-site scan total wall | 25.8 s | **26.0 s** | +0.5 s (~+2 %) — 9 ms / probe ML overhead |
+| ML scoring overhead per probe (median) | n/a | **8.8 ms** | runs synchronously on each result, no extra I/O |
+| ML probability median for CLAIMED probes | n/a | **97 / 100** | scoring properly anchors confident hits |
+| ML probability median for FREE probes | n/a | **24 / 100** | clean separation from CLAIMED — no overlap of medians |
+| `ml-disagree` signals / 100 (rule vs ML) | n/a | **10** | surfaces borderline calls for the operator without overriding the rule classifier |
+| Bundled model size (ONNX) | n/a | **~1 KB** | scikit-learn LogisticRegression, 8 features, 3 classes, ships in repo |
+| Live site catalog editor | — | **`POST /api/admin/sites` w/ override merge** | upsert / disable / delete the bundled `sites.json` from the SPA — no rebuild needed |
+| Custom sites supported | 0 | **unbounded** | persisted to SQLite `site_overrides`, merged at runtime, hot-reloadable |
+| Per-member scan history persisted | 0 | **last 50 scans / member / username** | gz-compressed JSON results in SQLite `scans`, with auto-pruning |
+| Scan diff endpoint | n/a | **`GET /api/history/diff/{a}/{b}`** | reports newly_claimed / no_longer_claimed / status_changed / confidence_shift |
 
 Maigret comparison ([details](./comparison-maigret.md)): Reckora's catalog
 is now within 20 % of maigret's 3,154 (we still drop maigret's 644

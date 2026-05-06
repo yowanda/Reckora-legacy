@@ -28,6 +28,104 @@ export interface CheckResult {
   // primary-side username to make the recursion edge easy to render.
   parent_username?: string | null
   discovered_via?: string
+  // Phase 4: complementary 0-100 probability from the bundled ONNX
+  // classifier. ``null``/missing = ML scoring wasn't run (model
+  // unavailable, feature disabled, or a SKIPPED probe).
+  ml_confidence?: number | null
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: admin DB editor + scan history.
+// ---------------------------------------------------------------------------
+
+export interface SiteRaw {
+  url: string
+  urlMain?: string
+  checkType?: string
+  regexCheck?: string
+  absenceStrs?: string[]
+  presenseStrs?: string[]
+  headers?: Record<string, string>
+  errors?: Record<string, string>
+  alexaRank?: number | null
+  tags?: string[]
+  requestHeadOnly?: boolean
+  ignore403?: boolean
+  engine?: string
+  prewarm?: boolean
+  disabled?: boolean
+}
+
+export type SiteSource = 'base' | 'override' | 'custom'
+
+export interface AdminSiteEntry {
+  name: string
+  source: SiteSource
+  disabled: boolean
+  engine: string | null
+  tags: string[]
+  raw: SiteRaw
+  override?: {
+    name: string
+    operation: 'upsert' | 'delete' | 'disable'
+    patch: Record<string, unknown>
+    created_by: string
+    created_at: number
+    updated_at: number
+  }
+}
+
+export interface AdminSitesResponse {
+  sites: AdminSiteEntry[]
+  total: number
+  custom_count: number
+  overridden_count: number
+  disabled_count: number
+}
+
+export interface ScanSummary {
+  id: number
+  member: string
+  username: string
+  mode: 'list' | 'graph'
+  started_at: number
+  finished_at: number
+  duration_ms: number
+  site_count: number
+  claimed: number
+  free: number
+  blocked: number
+  unknown: number
+  error_count: number
+}
+
+export interface ScanResultRow {
+  site: string
+  status: Status
+  confidence: number | null
+  ml_confidence: number | null
+  url: string | null
+  parent_username: string | null
+}
+
+export interface ScanDetail {
+  scan: ScanSummary
+  results: ScanResultRow[]
+}
+
+export interface ScanDiff {
+  from: ScanSummary
+  to: ScanSummary
+  newly_claimed: ScanResultRow[]
+  no_longer_claimed: ScanResultRow[]
+  status_changed: { site: string; from: Status | null; to: Status | null }[]
+  confidence_shift: {
+    site: string
+    status: Status
+    from_confidence: number
+    to_confidence: number
+  }[]
+  unchanged_count: number
 }
 
 export interface GraphEdge {
