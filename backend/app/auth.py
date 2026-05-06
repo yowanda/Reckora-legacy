@@ -153,6 +153,19 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_scans_member_username
                 ON scans(member, username, finished_at DESC);
+
+            -- Phase 5d: admin-managed runtime overrides on top of the
+            -- ``Settings`` defaults from environment / ``config.py``. Only
+            -- a tightly-scoped allowlist of integer knobs is accepted (see
+            -- ``app/admin_settings.py``); anything else is rejected at the
+            -- HTTP layer so we never end up with a half-typed override
+            -- table that the runtime can't interpret.
+            CREATE TABLE IF NOT EXISTS admin_settings (
+                key         TEXT PRIMARY KEY,
+                value       INTEGER NOT NULL,
+                updated_by  TEXT NOT NULL,
+                updated_at  INTEGER NOT NULL
+            );
             """
         )
 

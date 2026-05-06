@@ -46,6 +46,13 @@ from .config import settings
 from .sites import Site
 
 
+def _extract_min_confidence() -> int:
+    """Defer the import to break the cycle between checker → admin_settings → auth."""
+    from . import admin_settings as admin_settings_mod
+
+    return admin_settings_mod.effective_int("extract_min_confidence")
+
+
 class Status(StrEnum):
     CLAIMED = "claimed"
     FREE = "free"
@@ -585,7 +592,7 @@ async def check_site(
     if (
         extract
         and primary.status is Status.CLAIMED
-        and primary.confidence >= settings.extract_min_confidence
+        and primary.confidence >= _extract_min_confidence()
         and body
     ):
         from .extractor import extract_identifiers

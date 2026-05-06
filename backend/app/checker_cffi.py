@@ -48,6 +48,13 @@ from .config import settings
 from .sites import Site
 
 
+def _extract_min_confidence() -> int:
+    """Defer the import to break the cycle between checker_cffi → admin_settings → auth."""
+    from . import admin_settings as admin_settings_mod
+
+    return admin_settings_mod.effective_int("extract_min_confidence")
+
+
 class CffiRescue:
     """Lazy holder for a per-scan curl-cffi AsyncSession.
 
@@ -176,7 +183,7 @@ class CffiRescue:
         # extracts; the body we just got from curl-cffi is the highest-trust
         # body we'll have for these sites.
         extracted: dict[str, str] | None = None
-        if status is Status.CLAIMED and confidence >= settings.extract_min_confidence and body:
+        if status is Status.CLAIMED and confidence >= _extract_min_confidence() and body:
             from .extractor import extract_identifiers
 
             try:

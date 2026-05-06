@@ -1,11 +1,15 @@
 import { ApiError } from './types'
 import type {
+  AdminKnobsPatch,
+  AdminKnobsResponse,
   AdminSiteEntry,
   AdminSitesResponse,
   CheckResult,
+  EffectiveSettings,
   GraphEdge,
   GraphExtracted,
   Member,
+  PublicSettingsResponse,
   Role,
   ScanDetail,
   ScanDiff,
@@ -201,6 +205,26 @@ export async function adminRemoveOverride(name: string): Promise<void> {
 
 export async function adminReloadCatalog(): Promise<{ ok: boolean; sites: number }> {
   return jsonFetch('/api/admin/sites/reload', { method: 'POST' })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5d: admin-tunable runtime knobs (graph fanout + extractor floor)
+// ---------------------------------------------------------------------------
+
+export async function fetchEffectiveSettings(): Promise<EffectiveSettings> {
+  const body = await jsonFetch<PublicSettingsResponse>('/api/settings')
+  return body.settings
+}
+
+export async function adminGetKnobs(): Promise<AdminKnobsResponse> {
+  return jsonFetch<AdminKnobsResponse>('/api/admin/settings')
+}
+
+export async function adminPatchKnobs(patch: AdminKnobsPatch): Promise<AdminKnobsResponse> {
+  return jsonFetch<AdminKnobsResponse>('/api/admin/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  })
 }
 
 // ---------------------------------------------------------------------------

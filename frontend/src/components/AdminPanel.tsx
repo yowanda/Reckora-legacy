@@ -3,9 +3,10 @@ import { createMember, deleteMember, listMembers, patchMember } from '../api'
 import { useAuth } from '../auth-context'
 import { ApiError, type Member, type Role } from '../types'
 import { HistoryView } from './HistoryView'
+import { SettingsTab } from './SettingsTab'
 import { SitesEditor } from './SitesEditor'
 
-type AdminTab = 'members' | 'sites' | 'history'
+type AdminTab = 'members' | 'sites' | 'history' | 'settings'
 
 export function AdminPanel() {
   const [tab, setTab] = useState<AdminTab>('members')
@@ -15,7 +16,7 @@ export function AdminPanel() {
       <header>
         <h2 className="text-xl font-semibold tracking-tight">Admin</h2>
         <p className="mt-1 text-sm text-zinc-400">
-          Manage members, the site catalog, and your scan history. Phase 4.
+          Manage members, the site catalog, scan history, and runtime knobs.
         </p>
       </header>
 
@@ -29,11 +30,15 @@ export function AdminPanel() {
         <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
           History
         </TabButton>
+        <TabButton active={tab === 'settings'} onClick={() => setTab('settings')}>
+          Settings
+        </TabButton>
       </nav>
 
       {tab === 'members' && <MembersTab />}
       {tab === 'sites' && <SitesEditor />}
       {tab === 'history' && <HistoryView />}
+      {tab === 'settings' && <SettingsTab />}
     </section>
   )
 }

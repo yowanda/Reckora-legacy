@@ -20,6 +20,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from . import __version__
+from . import admin_settings as admin_settings_mod
 from . import auth as auth_mod
 from . import history as history_mod
 from . import site_overrides as overrides_mod
@@ -447,13 +448,21 @@ async def _graph_search_stream(
     *,
     member: Member | None = None,
 ) -> AsyncIterator[bytes]:
+    # Snapshot the admin overrides once per request so the whole stream
+    # observes a consistent set of knobs even if an admin saves new
+    # values mid-scan.
+    knobs = admin_settings_mod.effective_map()
+    effective_max_depth = knobs["graph_max_depth"]
+    effective_max_secondary = knobs["graph_max_secondary"]
+    effective_max_seed_hits = knobs["graph_max_seed_hits"]
+
     sites = catalog.filtered(tags=req.tags, limit=req.limit)
     yield _sse_event(
         "start",
         {
             "username": req.username,
             "total": len(sites),
-            "depth": min(req.depth, settings.graph_max_depth),
+            "depth": min(req.depth, effective_max_depth),
         },
     )
     if not sites:
@@ -461,10 +470,10 @@ async def _graph_search_stream(
         return
 
     max_secondary = min(
-        req.max_secondary or settings.graph_max_secondary,
-        settings.graph_max_secondary,
+        req.max_secondary or effective_max_secondary,
+        effective_max_secondary,
     )
-    effective_depth = min(req.depth, settings.graph_max_depth)
+    effective_depth = min(req.depth, effective_max_depth)
 
     started_at = history_mod.now_unix()
     primary_results: list[dict[str, Any]] = []
@@ -491,7 +500,7 @@ async def _graph_search_stream(
                 effective_depth >= 1
                 and result.status.value == "claimed"
                 and result.extracted
-                and len(seed_hits) < settings.graph_max_seed_hits
+                and len(seed_hits) < effective_max_seed_hits
             ):
                 seed_hits.append((req.username, payload))
 
@@ -732,6 +741,81 @@ async def admin_reload_catalog(_: Member = Depends(current_admin)) -> dict[str, 
         raise HTTPException(404, "site overrides disabled")
     catalog = reload_catalog()
     return {"ok": True, "sites": len(catalog.sites)}
+
+
+# ---------------------------------------------------------------------------
+# Phase 5d: admin-tunable runtime knobs (graph fanout, extractor floor).
+# ---------------------------------------------------------------------------
+
+
+class AdminSettingsPatch(BaseModel):
+    """Body for ``PATCH /api/admin/settings``.
+
+    Each field is ``int | None``. ``None`` deletes the override for that
+    key (reverting to the env-var default); a missing field is a no-op
+    so the UI can submit only the changed knobs.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    graph_max_depth: int | None = None
+    graph_max_secondary: int | None = None
+    graph_max_seed_hits: int | None = None
+    extract_min_confidence: int | None = None
+    # Per-key sentinel: when present in ``reset`` the override row is
+    # deleted regardless of whether ``<key>=None`` was sent (allows
+    # disambiguating "don't touch" vs "reset to default" on PATCH).
+    reset: list[str] | None = None
+
+
+@app.get("/api/settings")
+async def public_settings(
+    _: Member = Depends(current_member),
+) -> dict[str, Any]:
+    """Effective integer knobs visible to any signed-in member.
+
+    The frontend uses this to surface, for example, the maximum recursion
+    depth currently allowed so the depth slider can clamp itself.
+    """
+    return {"settings": admin_settings_mod.effective_map()}
+
+
+@app.get("/api/admin/settings")
+async def admin_get_settings(
+    _: Member = Depends(current_admin),
+) -> dict[str, Any]:
+    """Full descriptor list for the admin settings panel."""
+    return {"knobs": admin_settings_mod.describe()}
+
+
+@app.patch("/api/admin/settings")
+async def admin_patch_settings(
+    body: AdminSettingsPatch,
+    admin: Member = Depends(current_admin),
+) -> dict[str, Any]:
+    """Set or reset one or more admin overrides.
+
+    Returns the post-mutation descriptor list so the UI can refresh
+    without a follow-up GET.
+    """
+    payload = body.model_dump(exclude_none=False)
+    reset_keys: set[str] = set(payload.pop("reset") or [])
+    for key in reset_keys:
+        if key not in admin_settings_mod.ALLOWED_KEYS:
+            raise HTTPException(400, f"unknown knob: {key}")
+        admin_settings_mod.delete_override(key)
+    for key, value in payload.items():
+        if key not in admin_settings_mod.ALLOWED_KEYS:
+            continue
+        if value is None:
+            continue
+        try:
+            admin_settings_mod.set_override(key, value, actor=admin.username)
+        except admin_settings_mod.UnknownKnob as e:
+            raise HTTPException(400, f"unknown knob: {e}") from e
+        except admin_settings_mod.KnobOutOfRange as e:
+            raise HTTPException(400, str(e)) from e
+    return {"knobs": admin_settings_mod.describe()}
 
 
 # ---------------------------------------------------------------------------

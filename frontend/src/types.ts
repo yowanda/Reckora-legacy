@@ -83,6 +83,44 @@ export interface AdminSitesResponse {
   disabled_count: number
 }
 
+// ---------------------------------------------------------------------------
+// Phase 5d: admin-tunable runtime knobs (graph fanout + extractor floor).
+// ---------------------------------------------------------------------------
+
+export type AdminKnobKey =
+  | 'graph_max_depth'
+  | 'graph_max_secondary'
+  | 'graph_max_seed_hits'
+  | 'extract_min_confidence'
+
+export interface AdminKnob {
+  key: AdminKnobKey
+  description: string
+  minimum: number
+  maximum: number
+  default: number
+  override: number | null
+  effective: number
+}
+
+export interface AdminKnobsResponse {
+  knobs: AdminKnob[]
+}
+
+export type EffectiveSettings = Record<AdminKnobKey, number>
+
+export interface PublicSettingsResponse {
+  settings: EffectiveSettings
+}
+
+export interface AdminKnobsPatch {
+  graph_max_depth?: number | null
+  graph_max_secondary?: number | null
+  graph_max_seed_hits?: number | null
+  extract_min_confidence?: number | null
+  reset?: AdminKnobKey[]
+}
+
 export interface ScanSummary {
   id: number
   member: string
