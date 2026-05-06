@@ -92,9 +92,49 @@ CACADOXX_ADMIN_PASSWORD=adminadmin \
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-`backend/Dockerfile` and `fly.toml` are pre-configured for
-[Fly.io](https://fly.io); just run `fly deploy` after setting the admin
-secrets via `fly secrets set CACADOXX_ADMIN_USERNAME=… CACADOXX_ADMIN_PASSWORD=…`.
+### Deploy
+
+Two paths. **Hugging Face Spaces** is recommended because it is genuinely
+free, doesn't ask for a credit card, and supports raw Docker so you can
+ship the existing `backend/Dockerfile` as-is.
+
+#### Hugging Face Spaces (free, no credit card)
+
+The repo ships with a top-level `Dockerfile` that does the whole build
+(frontend → static bundle → backend image, single origin) so the Space
+can use **Docker SDK** with no extra config.
+
+1. Sign up at <https://huggingface.co/join>.
+2. Create a Space at <https://huggingface.co/new-space>:
+   - **Space SDK**: **Docker** → blank template.
+   - **Visibility**: public (the auth gate is in-app).
+3. Add Space secrets under *Settings → Variables and secrets*:
+   - `CACADOXX_ADMIN_USERNAME`
+   - `CACADOXX_ADMIN_PASSWORD`
+   - (optional) `CACADOXX_SESSION_SECRET` — any 32+ char random string.
+4. Mirror this repo's contents into the Space's git
+   (the Space build picks up the top-level `Dockerfile` automatically):
+   ```bash
+   git clone https://huggingface.co/spaces/<user>/<space-name> hf-space
+   cp -r Cacadoxx/* hf-space/
+   cd hf-space && git add -A && git commit -m "deploy" && git push
+   ```
+5. The Space builds the image and serves the app at
+   `https://<user>-<space-name>.hf.space`. Sign in with the seed admin
+   credentials, then create the rest of your members from the
+   **Admin** tab.
+
+#### Fly.io (paid as of late 2024)
+
+`backend/Dockerfile` and `fly.toml` are pre-configured. Note that Fly now
+requires a payment method on file even for the small free allowance.
+
+```bash
+fly auth login
+fly secrets set CACADOXX_ADMIN_USERNAME=adminganteng \
+                CACADOXX_ADMIN_PASSWORD=<strong-password>
+fly deploy
+```
 
 ## API
 
@@ -133,6 +173,40 @@ cd frontend && pnpm lint && pnpm tsc --noEmit && pnpm build
 ```
 
 CI runs both on every push (`.github/workflows/ci.yml`).
+
+### What's covered
+
+- **Backend (27 pytest cases)** — health endpoint, auth gate on
+  `/api/sites` and `/api/search`, login (success / wrong password /
+  rate-limit), `/api/auth/me` round-trip, admin CRUD on
+  `/api/admin/members`, role-gating (member → 403), self-delete and
+  last-admin guards.
+- **Frontend** — ESLint + `tsc --noEmit` + production `vite build`.
+
+### End-to-end verified flows
+
+The login + admin lifecycle has been exercised manually against a built
+single-origin server. All assertions below passed:
+
+1. Anonymous load forces the login screen; `/api/sites` returns `401`.
+2. Wrong password → exact text `Invalid username or password.` (no info
+   leakage on whether the user exists).
+3. Admin login lands on the search view with the **Admin** tab visible
+   and the seed admin row marked `(you)`.
+4. Adding a member from the Admin tab refreshes the table immediately
+   with the new role badge and "Reset password" / "Delete" actions.
+5. The new member can log in, **does not** see the Admin tab, and gets
+   `403 admin role required` on `GET /api/admin/members` and on
+   `PATCH /api/admin/members/<self>` (so a member cannot self-reset
+   their own password — admin-only by design).
+6. The member can run a streaming search (250 sites checked, dozens of
+   claimed accounts on a real public username).
+7. After an admin password reset, the old password is rejected and the
+   new one works.
+8. Admin delete removes the row immediately. `DELETE` against the
+   currently-signed-in admin returns `400 cannot delete the
+   currently signed-in admin`; demoting the only admin returns
+   `400 cannot demote the last admin`.
 
 ## Credits
 
