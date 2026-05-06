@@ -78,6 +78,12 @@ class Site:
     # when the raw entry doesn't carry an explicit ``identityTypes``)
     # or from per-site override patches via the admin DB editor.
     identity_types: tuple[IdentityType, ...] = (DEFAULT_IDENTITY_TYPE,)
+    # Phase 5h Layer E: alternate probe URL. Some sites have a separate
+    # API endpoint for checking username existence (``urlProbe``) while
+    # the human-facing display URL (``url``) is different. When set and
+    # != ``url``, Layer E probes the display URL independently after the
+    # main liveness check passes on the probe URL.
+    url_probe: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +185,7 @@ def _coerce_site(name: str, raw: dict, *, source: str = "base") -> Site | None:
         disabled=bool(raw.get("disabled")),
         source=source,  # type: ignore[arg-type]
         identity_types=identity_types,
+        url_probe=raw.get("urlProbe"),
     )
 
 
@@ -216,6 +223,8 @@ def site_to_raw(site: Site) -> dict:
         raw["disabled"] = True
     if site.identity_types and site.identity_types != (DEFAULT_IDENTITY_TYPE,):
         raw["identityTypes"] = list(site.identity_types)
+    if site.url_probe:
+        raw["urlProbe"] = site.url_probe
     return raw
 
 

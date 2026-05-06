@@ -147,3 +147,55 @@ async def test_5h_d_disabled_knob_skips_probe(monkeypatch: pytest.MonkeyPatch) -
         result = await _link_liveness_probe(client, _claimed(), _site())
     assert result.status is Status.CLAIMED
     assert not any(s.startswith("link-") for s in result.signals)
+
+
+# ---------------------------------------------------------------------------
+# Layer E — dual-URL check (url_probe != url)
+# ---------------------------------------------------------------------------
+
+
+async def test_5h_e_dual_url_demotes_when_display_dies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Probe URL passes liveness but display URL returns 404 → demote."""
+    _force_admin_int(monkeypatch, _ENABLE_LIVENESS_KNOBS)
+    probe_url = "https://api.example.com/users/{username}"
+    display_url = "https://example.com/{username}"
+    site = _site(url=display_url, url_probe=probe_url)
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        if "api.example.com" in str(req.url):
+            return httpx.Response(200, text="ok")
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(_handler)
+    # primary.url = probe URL (simulates Phase 6b where the checker uses
+    # url_probe for the initial detection; primary.url differs from the
+    # display URL derived from site.url).
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await _link_liveness_probe(
+            client,
+            _claimed("https://api.example.com/users/alice"),
+            site,
+            username="alice",
+        )
+    assert result.status is Status.UNKNOWN
+    assert any("display-url-dead" in s for s in result.signals), result.signals
+
+
+async def test_5h_e_dual_url_passes_when_both_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Both probe URL and display URL return 200 → stays CLAIMED."""
+    _force_admin_int(monkeypatch, _ENABLE_LIVENESS_KNOBS)
+    probe_url = "https://api.example.com/users/{username}"
+    display_url = "https://example.com/{username}"
+    site = _site(url=display_url, url_probe=probe_url)
+
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, text="profile"))
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await _link_liveness_probe(
+            client,
+            _claimed("https://api.example.com/users/alice"),
+            site,
+            username="alice",
+        )
+    assert result.status is Status.CLAIMED
+    assert "link-verified-live" in result.signals
+    assert not any("display-url-dead" in s for s in result.signals)

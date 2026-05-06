@@ -195,8 +195,10 @@ async def _link_liveness_probe(
     client: httpx.AsyncClient,
     primary: CheckResult,
     site: Site,
+    *,
+    username: str = "",
 ) -> CheckResult:
-    """Phase 5h Layer D — HEAD/GET the display URL and demote dead links.
+    """Phase 5h Layer D+E — HEAD/GET the display URL and demote dead links.
 
     The probe is a no-op when ``enable_link_liveness`` is disabled, when
     the row isn't CLAIMED, or when ``primary.url`` is empty. On any
@@ -208,6 +210,13 @@ async def _link_liveness_probe(
 
     A successful liveness check appends ``link-verified-live`` so the
     SPA can render a green badge.
+
+    **Layer E (dual-URL check):** when ``site.url_probe`` is set and
+    differs from ``site.url``, the display URL (derived from
+    ``site.url``) may differ from what was probed. After the primary
+    liveness check passes, Layer E probes the display URL independently
+    and demotes with ``display-url-dead`` if it fails liveness even
+    though the probe URL was fine.
     """
     if _admin_int("enable_link_liveness") != 1:
         return primary
@@ -260,6 +269,51 @@ async def _link_liveness_probe(
         return primary
 
     primary.signals = [*primary.signals, "link-verified-live"]
+
+    # Phase 5h Layer E — dual-URL check.
+    #
+    # When ``site.url_probe`` is set and differs from ``site.url``, the
+    # display URL may differ from the URL that was probed for liveness
+    # above.  Probe the display URL independently and demote with
+    # ``display-url-dead`` if it fails liveness even though the probe
+    # URL was fine.  This catches sites where the API endpoint is
+    # healthy but the human-facing page is a 404 / login wall / homepage
+    # redirect.
+    if site.url_probe and site.url_probe != site.url and username:
+        display_url = site.url.replace("{username}", username)
+        if display_url != primary.url:
+            try:
+                dresp = await client.head(
+                    display_url,
+                    headers=headers,
+                    follow_redirects=True,
+                    timeout=timeout,
+                )
+                if dresp.status_code in (405, 501):
+                    dresp = await client.get(
+                        display_url,
+                        headers=headers,
+                        follow_redirects=True,
+                        timeout=timeout,
+                    )
+            except (httpx.HTTPError, httpx.InvalidURL):
+                return primary
+
+            dbody = ""
+            if dresp.request.method == "GET":
+                try:
+                    dbody = dresp.text or ""
+                except Exception:
+                    dbody = ""
+            if dresp.status_code in (429, 451) or (dbody and _is_blocked_body(dbody)):
+                return primary
+
+            dreason = _link_liveness_demote_reason(dresp, site)
+            if dreason is not None:
+                primary.signals = [*primary.signals, f"display-url-dead:{dreason}"]
+                primary.status = Status.UNKNOWN
+                return primary
+
     return primary
 
 
@@ -932,7 +986,7 @@ async def check_site(
     # Phase 5h Layer D — link-liveness probe. Only runs when the row is
     # still CLAIMED after the precision floor (the floor's a cheap
     # short-circuit).
-    primary = await _link_liveness_probe(client, primary, site)
+    primary = await _link_liveness_probe(client, primary, site, username=encoded)
     return primary
 
 
