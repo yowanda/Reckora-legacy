@@ -8,6 +8,7 @@ import type {
   EffectiveSettings,
   GraphEdge,
   GraphExtracted,
+  IdentityType,
   Member,
   ProxyStatus,
   PublicSettingsResponse,
@@ -129,7 +130,16 @@ export interface SearchEvents {
 }
 
 export async function streamSearch(
-  payload: { username: string; tags: string[]; limit: number },
+  payload: {
+    username: string
+    tags: string[]
+    limit: number
+    // Phase 5a: ``identity_type`` selects which kind of identifier
+    // ``username`` is. Defaults to ``username`` server-side when
+    // omitted; the SPA only sends it when the user picks a non-default
+    // identity in the search bar.
+    identity_type?: IdentityType
+  },
   events: SearchEvents,
 ): Promise<void> {
   const r = await fetch(`${API_BASE}/api/search`, {

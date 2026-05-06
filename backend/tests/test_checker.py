@@ -77,6 +77,72 @@ async def test_skipped_when_regex_fails() -> None:
     assert result.status is Status.SKIPPED
 
 
+# ---------- Phase 5a: identity-type plumbing ----------
+
+
+async def test_check_site_skipped_when_identity_type_unsupported() -> None:
+    """A username-only site probed with ``identity_type=email`` short-circuits."""
+    site = _site()  # default identity_types=("username",)
+    transport = httpx.MockTransport(lambda req: httpx.Response(200))
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(client, site, "alice@example.com", identity_type="email")
+    assert result.status is Status.SKIPPED
+    assert "identity-mismatch" in result.signals
+
+
+async def test_check_site_runs_when_identity_type_matches() -> None:
+    """An email-annotated site accepts ``identity_type=email`` and probes the URL."""
+    site = _site(identity_types=("email",))
+    seen: dict[str, str] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["url"] = str(req.url)
+        return httpx.Response(200, text="hi")
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(client, site, "alice@example.com", identity_type="email")
+    # The default {username} substitution receives the raw email value
+    # (no per-site transform registered for ``Example``).
+    assert seen["url"].endswith("/alice@example.com")
+    assert result.status is Status.CLAIMED
+
+
+async def test_check_site_regex_check_skipped_for_non_username_identity() -> None:
+    """``regex_check`` is tuned for usernames — non-username scans bypass it."""
+    site = _site(
+        identity_types=("email",),
+        regex_check=r"^[a-z]+$",  # would reject the email's '@' otherwise
+    )
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, text="ok"))
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(client, site, "alice@example.com", identity_type="email")
+    # If the regex were applied, we'd see SKIPPED with regex-mismatch.
+    assert result.status is Status.CLAIMED
+
+
+async def test_check_site_gravatar_email_md5_transform() -> None:
+    """The curated Gravatar transform hashes the email before substitution."""
+    import hashlib
+
+    site = _site(
+        name="Gravatar",
+        url="https://gravatar.com/{username}",
+        identity_types=("email",),
+    )
+    captured: dict[str, str] = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["url"] = str(req.url)
+        return httpx.Response(200)
+
+    transport = httpx.MockTransport(handler)
+    expected_hash = hashlib.md5(b"alice@example.com").hexdigest()
+    async with httpx.AsyncClient(transport=transport) as client:
+        await check_site(client, site, "alice@example.com", identity_type="email")
+    assert captured["url"].endswith(f"/{expected_hash}")
+
+
 async def test_error_on_timeout() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         del request

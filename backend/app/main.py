@@ -14,7 +14,7 @@ from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, ORJSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -35,6 +35,13 @@ from .auth import (
 from .cache import TTLCache
 from .checker import is_valid_username, stream_checks
 from .config import settings
+from .identity import (
+    ALL_IDENTITY_TYPES,
+    DEFAULT_IDENTITY_TYPE,
+    IdentityType,
+    is_valid_identifier,
+    normalise_identifier,
+)
 from .sites import SiteCatalog, load_catalog, reload_catalog, site_to_raw
 
 logger = logging.getLogger("reckora")
@@ -114,17 +121,47 @@ def get_catalog() -> SiteCatalog:
 
 
 class SearchRequest(BaseModel):
-    username: str = Field(..., min_length=1, max_length=64)
+    # Phase 5a: ``username`` is now a generic identifier (username /
+    # email / phone / GAIA / Yandex / Skype). The field name is kept
+    # for backwards compat with the pre-5a SSE schema; the
+    # authoritative shape is governed by ``identity_type``.
+    username: str = Field(..., min_length=1, max_length=320)
     tags: list[str] = Field(default_factory=list)
     limit: int = Field(default=200, ge=1, le=600)
+    identity_type: IdentityType = Field(default=DEFAULT_IDENTITY_TYPE)
+
+    @field_validator("identity_type")
+    @classmethod
+    def _validate_identity_type(cls, v: str) -> str:
+        if v not in ALL_IDENTITY_TYPES:
+            raise ValueError(f"unknown identity_type {v!r} (allowed: {sorted(ALL_IDENTITY_TYPES)})")
+        return v
 
     @field_validator("username")
     @classmethod
     def _validate_username(cls, v: str) -> str:
+        # Per-type validation happens in ``model_validator`` once both
+        # ``username`` and ``identity_type`` have been parsed. Here we
+        # only enforce the universal upper bound (320 = the max RFC
+        # 5321 email length); per-type bounds are tighter.
         v = v.strip()
-        if not is_valid_username(v):
-            raise ValueError("invalid username (allowed: letters, digits, _ . -)")
+        if not v:
+            raise ValueError("identifier must not be empty")
         return v
+
+    @model_validator(mode="after")
+    def _normalise_and_validate_per_identity(self) -> SearchRequest:
+        identity_type = self.identity_type
+        normalised = normalise_identifier(self.username, identity_type)
+        if not is_valid_identifier(normalised, identity_type):
+            raise ValueError(
+                f"invalid {identity_type} (value did not match the {identity_type} format)"
+            )
+        # Re-assign the normalised value so the rest of the request
+        # pipeline (cache key, history record, SSE payload) sees the
+        # canonical form.
+        object.__setattr__(self, "username", normalised)
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -376,15 +413,28 @@ async def _search_stream(
     *,
     member: Member | None = None,
 ) -> AsyncIterator[bytes]:
-    sites = catalog.filtered(tags=req.tags, limit=req.limit)
-    yield _sse_event("start", {"username": req.username, "total": len(sites)})
+    identity_type = req.identity_type
+    sites = catalog.filtered(tags=req.tags, limit=req.limit, identity_type=identity_type)
+    yield _sse_event(
+        "start",
+        {
+            "username": req.username,
+            "total": len(sites),
+            "identity_type": identity_type,
+        },
+    )
 
     if not sites:
         yield _sse_event("done", {"results": 0})
         return
 
     cache_key = json.dumps(
-        {"u": req.username, "t": sorted(req.tags), "l": req.limit},
+        {
+            "u": req.username,
+            "t": sorted(req.tags),
+            "l": req.limit,
+            "i": identity_type,
+        },
         sort_keys=True,
         ensure_ascii=False,
     )
@@ -400,7 +450,12 @@ async def _search_stream(
     collected: list[dict[str, Any]] = []
     # Phase 1: HTTP/2 + connection pool. Phase 5e: optional proxy.
     async with _new_async_client() as client:
-        async for result in stream_checks(sites, req.username, client=client):
+        async for result in stream_checks(
+            sites,
+            req.username,
+            identity_type=identity_type,
+            client=client,
+        ):
             payload = result.to_dict()
             collected.append(payload)
             yield _sse_event("result", payload)
@@ -454,10 +509,24 @@ class GraphSearchRequest(SearchRequest):
 
     ``depth=0`` collapses to a regular search; ``depth>=1`` runs sub-scans
     on secondary usernames extracted from the primary CLAIMED hits.
+
+    Phase 5a: graph search is username-only — the extractor pulls
+    ``username``-shaped child handles out of profile pages, and feeding
+    those into an email/phone scan would be category-confused. Non-
+    username ``identity_type`` values are rejected at the validator layer.
     """
 
     depth: int = Field(default=1, ge=0, le=2)
     max_secondary: int | None = Field(default=None, ge=1, le=20)
+
+    @model_validator(mode="after")
+    def _reject_non_username_identity(self) -> GraphSearchRequest:
+        if self.identity_type != DEFAULT_IDENTITY_TYPE:
+            raise ValueError(
+                "graph search supports identity_type='username' only "
+                "(got identity_type=" + str(self.identity_type) + ")"
+            )
+        return self
 
 
 async def _graph_search_stream(
@@ -629,10 +698,24 @@ class PermuteSearchRequest(SearchRequest):
     candidates come from ``permutations.generate_permutations`` and are
     scanned sequentially over the same httpx client to amortise the
     connection pool across permutations.
+
+    Phase 5a: permutation strategies (separator/suffix/prefix/leetspeak)
+    operate on username-shaped strings; they don't make sense for
+    emails/phones/etc. Non-username ``identity_type`` values are
+    rejected at the validator layer.
     """
 
     max_permutations: int = Field(default=10, ge=0, le=40)
     strategies: list[str] | None = Field(default=None)
+
+    @model_validator(mode="after")
+    def _reject_non_username_identity(self) -> PermuteSearchRequest:
+        if self.identity_type != DEFAULT_IDENTITY_TYPE:
+            raise ValueError(
+                "permutation search supports identity_type='username' only "
+                "(got identity_type=" + str(self.identity_type) + ")"
+            )
+        return self
 
     @field_validator("strategies")
     @classmethod

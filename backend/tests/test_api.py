@@ -103,6 +103,82 @@ def test_search_validates_username(client: TestClient, admin_token: str) -> None
     assert r.status_code == 422
 
 
+def test_search_accepts_email_identity_type(client: TestClient, admin_token: str) -> None:
+    """Phase 5a: a well-formed email + identity_type=email is accepted."""
+    r = client.post(
+        "/api/search",
+        json={
+            "username": "Alice@Example.com",
+            "identity_type": "email",
+            "limit": 1,
+        },
+        headers=_hdr(admin_token),
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_search_rejects_email_with_username_identity_type(
+    client: TestClient, admin_token: str
+) -> None:
+    """Phase 5a: an email value scanned as ``username`` fails validation."""
+    r = client.post(
+        "/api/search",
+        json={"username": "alice@example.com"},
+        headers=_hdr(admin_token),
+    )
+    assert r.status_code == 422
+
+
+def test_search_rejects_username_value_with_email_identity_type(
+    client: TestClient, admin_token: str
+) -> None:
+    """Phase 5a: bare username with identity_type=email also fails."""
+    r = client.post(
+        "/api/search",
+        json={"username": "alice", "identity_type": "email"},
+        headers=_hdr(admin_token),
+    )
+    assert r.status_code == 422
+
+
+def test_search_rejects_unknown_identity_type(client: TestClient, admin_token: str) -> None:
+    """Phase 5a: a typo in identity_type is rejected before any I/O."""
+    r = client.post(
+        "/api/search",
+        json={"username": "alice", "identity_type": "bogus"},
+        headers=_hdr(admin_token),
+    )
+    assert r.status_code == 422
+
+
+def test_search_graph_rejects_non_username_identity(client: TestClient, admin_token: str) -> None:
+    """Phase 5a: graph search is username-only — non-username 422s."""
+    r = client.post(
+        "/api/search/graph",
+        json={
+            "username": "alice@example.com",
+            "identity_type": "email",
+            "limit": 1,
+        },
+        headers=_hdr(admin_token),
+    )
+    assert r.status_code == 422
+
+
+def test_search_permute_rejects_non_username_identity(client: TestClient, admin_token: str) -> None:
+    """Phase 5a: permutation search is username-only — non-username 422s."""
+    r = client.post(
+        "/api/search/permute",
+        json={
+            "username": "+12025551234",
+            "identity_type": "phone",
+            "limit": 1,
+        },
+        headers=_hdr(admin_token),
+    )
+    assert r.status_code == 422
+
+
 def test_admin_member_crud(client: TestClient, admin_token: str) -> None:
     headers = _hdr(admin_token)
 

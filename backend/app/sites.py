@@ -24,6 +24,12 @@ from pathlib import Path
 from typing import Literal
 
 from .config import settings
+from .identity import (
+    ALL_IDENTITY_TYPES,
+    DEFAULT_IDENTITY_TYPE,
+    KNOWN_IDENTITY_OVERRIDES,
+    IdentityType,
+)
 
 CheckType = Literal["status_code", "message", "response_url"]
 
@@ -65,6 +71,13 @@ class Site:
     # Phase 4: provenance — ``base`` = bundled sites.json, ``override``
     # = upsert patch, ``custom`` = added entirely via admin editor.
     source: Literal["base", "override", "custom"] = "base"
+    # Phase 5a: which identity types this site accepts. Defaults to
+    # ``("username",)`` for backwards compat with the username-only
+    # Phase 1-4 catalog. Annotations come from the curated
+    # ``identity.KNOWN_IDENTITY_OVERRIDES`` map (applied at load time
+    # when the raw entry doesn't carry an explicit ``identityTypes``)
+    # or from per-site override patches via the admin DB editor.
+    identity_types: tuple[IdentityType, ...] = (DEFAULT_IDENTITY_TYPE,)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,11 +90,18 @@ class SiteCatalog:
                 return s
         return None
 
-    def filtered(self, tags: Iterable[str] | None = None, limit: int | None = None) -> list[Site]:
+    def filtered(
+        self,
+        tags: Iterable[str] | None = None,
+        limit: int | None = None,
+        identity_type: IdentityType = DEFAULT_IDENTITY_TYPE,
+    ) -> list[Site]:
         wanted = {t.lower() for t in tags or ()}
         out: list[Site] = []
         for s in self.sites:
             if s.disabled:
+                continue
+            if identity_type not in s.identity_types:
                 continue
             if wanted and not ({t.lower() for t in s.tags} & wanted):
                 continue
@@ -112,7 +132,7 @@ def _coerce_site(name: str, raw: dict, *, source: str = "base") -> Site | None:
         headers = tuple(
             (str(h[0]), str(h[1]))
             for h in headers_raw
-            if isinstance(h, (list, tuple)) and len(h) == 2
+            if isinstance(h, list | tuple) and len(h) == 2
         )
     else:
         headers = ()
@@ -125,6 +145,21 @@ def _coerce_site(name: str, raw: dict, *, source: str = "base") -> Site | None:
         error_strs = tuple(str(e) for e in errors_raw)
     else:
         error_strs = ()
+    raw_identity = raw.get("identityTypes")
+    if isinstance(raw_identity, list) and raw_identity:
+        # Filter out unknown values defensively so a typo in an admin
+        # patch doesn't crash the loader; fall back to the default if
+        # nothing recognised survives.
+        identity_types: tuple[IdentityType, ...] = tuple(
+            t for t in raw_identity if t in ALL_IDENTITY_TYPES
+        )
+        if not identity_types:
+            identity_types = (DEFAULT_IDENTITY_TYPE,)
+    else:
+        # Curated overrides apply only when the raw entry doesn't
+        # already carry an ``identityTypes`` field — admin patches win.
+        identity_types = KNOWN_IDENTITY_OVERRIDES.get(name, (DEFAULT_IDENTITY_TYPE,))
+
     return Site(
         name=name,
         url=url,
@@ -143,6 +178,7 @@ def _coerce_site(name: str, raw: dict, *, source: str = "base") -> Site | None:
         prewarm=bool(raw.get("prewarm")),
         disabled=bool(raw.get("disabled")),
         source=source,  # type: ignore[arg-type]
+        identity_types=identity_types,
     )
 
 
@@ -178,6 +214,8 @@ def site_to_raw(site: Site) -> dict:
         raw["prewarm"] = True
     if site.disabled:
         raw["disabled"] = True
+    if site.identity_types and site.identity_types != (DEFAULT_IDENTITY_TYPE,):
+        raw["identityTypes"] = list(site.identity_types)
     return raw
 
 

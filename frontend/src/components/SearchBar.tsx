@@ -1,14 +1,35 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
+import {
+  IDENTITY_TYPES,
+  IDENTITY_TYPE_META,
+  type IdentityType,
+} from '../types'
 
 interface Props {
-  onSubmit: (username: string) => void
+  onSubmit: (value: string, identity_type: IdentityType) => void
   isRunning: boolean
   onStop: () => void
   initial?: string
+  // Phase 5a: when the parent forces a specific identity (e.g. graph
+  // and permute modes are username-only), pass `lockedIdentityType` to
+  // hide the picker and pin the input to that type.
+  lockedIdentityType?: IdentityType
 }
 
-export function SearchBar({ onSubmit, isRunning, onStop, initial = '' }: Props) {
+export function SearchBar({
+  onSubmit,
+  isRunning,
+  onStop,
+  initial = '',
+  lockedIdentityType,
+}: Props) {
   const [value, setValue] = useState(initial)
+  // ``pickedType`` is the user's most recent selection; the active
+  // identity type is the parent-supplied lock when present, otherwise
+  // the picker's own value. Deriving instead of mirroring the lock
+  // into local state avoids the React 19 "setState in effect" lint.
+  const [pickedType, setPickedType] = useState<IdentityType>('username')
+  const identityType: IdentityType = lockedIdentityType ?? pickedType
   const inputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -16,30 +37,57 @@ export function SearchBar({ onSubmit, isRunning, onStop, initial = '' }: Props) 
     inputRef.current?.focus()
   }, [])
 
+  const meta = IDENTITY_TYPE_META[identityType]
+
   function handle(e: FormEvent) {
     e.preventDefault()
     const trimmed = value.trim()
-    if (!/^[A-Za-z0-9_.-]{1,64}$/.test(trimmed)) {
-      setError('only letters, digits, _ . - (max 64 chars)')
+    const re = new RegExp(meta.pattern)
+    if (!re.test(trimmed)) {
+      setError(meta.hint)
       return
     }
     setError(null)
-    onSubmit(trimmed)
+    onSubmit(trimmed, identityType)
   }
 
   return (
     <form onSubmit={handle} className="space-y-2">
       <div className="flex flex-col gap-2 sm:flex-row">
+        {!lockedIdentityType && (
+          <select
+            className="input h-12 sm:w-44"
+            value={pickedType}
+            onChange={(e) => {
+              setPickedType(e.target.value as IdentityType)
+              setError(null)
+            }}
+            disabled={isRunning}
+            aria-label="Identity type"
+            title="Pick an identifier type — the search input adapts its placeholder + validator"
+          >
+            {IDENTITY_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {IDENTITY_TYPE_META[t].label}
+              </option>
+            ))}
+          </select>
+        )}
         <input
           ref={inputRef}
           className="input flex-1"
-          placeholder="enter a username, e.g. github, torvalds, jack"
+          placeholder={meta.placeholder}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           disabled={isRunning}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
+          // Type stays "text" because some browsers refuse to submit
+          // invalid email/tel inputs but our backend re-validates and
+          // gives clearer error messages anyway.
+          type="text"
+          inputMode={identityType === 'phone' ? 'tel' : 'text'}
         />
         {isRunning ? (
           <button type="button" onClick={onStop} className="btn-ghost h-12 px-5">
@@ -53,6 +101,9 @@ export function SearchBar({ onSubmit, isRunning, onStop, initial = '' }: Props) 
         )}
       </div>
       {error && <p className="text-sm text-bad">{error}</p>}
+      {!error && identityType !== 'username' && !isRunning && (
+        <p className="text-xs text-zinc-500">{meta.hint}</p>
+      )}
     </form>
   )
 }

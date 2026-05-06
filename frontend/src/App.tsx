@@ -15,6 +15,7 @@ import type {
   GraphEdge,
   GraphExtracted,
   GraphProgress,
+  IdentityType,
   SearchProgress,
   SitesResponse,
 } from './types'
@@ -99,7 +100,7 @@ function SearchView() {
       .catch(() => setCatalog({ count: 0, tags: [], sites: [] }))
   }, [])
 
-  function startSearch(name: string) {
+  function startSearch(name: string, identityType: IdentityType = 'username') {
     abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -216,7 +217,7 @@ function SearchView() {
 
     setProgress({ total: 0, done: 0, results: [], state: 'running' })
     streamSearch(
-      { username: name, tags, limit: 250 },
+      { username: name, tags, limit: 250, identity_type: identityType },
       {
         signal: ctrl.signal,
         onStart: ({ total }) => setProgress((p) => ({ ...p, total, state: 'running' })),
@@ -300,6 +301,9 @@ function SearchView() {
           isRunning={isRunning}
           onStop={stopSearch}
           initial={username}
+          // Phase 5a: graph + permute backends reject non-username
+          // identity_type values, so lock the picker accordingly.
+          lockedIdentityType={mode === 'list' ? undefined : 'username'}
         />
         {catalog && (
           <TagFilter

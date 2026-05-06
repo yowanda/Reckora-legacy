@@ -39,9 +39,9 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 2 — anti-bot & verify | shipped (bd7b768) | 2,506 | 0–100 | yes | yes (Firefox UA + rotated referrer) | yes (~928 sites) | yes (curl-cffi chrome131) | — | — |
 | 3 — extraction & graph | shipped | 2,506 | 0–100 | yes | yes | yes | yes | **yes (socid_extractor + react-flow)** | — |
 | 4 — beyond maigret | shipped | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes | **yes (ONNX) + admin live DB editor + scan-history diff** |
-| 5 — operator polish | shipped 5/6 (5f, 5d, 5c, 5e, 5b); 5a deferred | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes (depth admin-tunable) | yes |
+| 5 — operator polish | shipped 6/6 (5f, 5d, 5c, 5e, 5b, 5a) | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes (depth admin-tunable) | yes |
 
-### Phase 5 — operator polish (5/6 sub-phases shipped)
+### Phase 5 — operator polish (6/6 sub-phases shipped)
 
 Phase 5 is split into six focused commits, each landing direct-to-main with
 its own CI green + auto-deploy to the HF Space. The sub-phase letters reflect
@@ -54,9 +54,9 @@ implementation order, not feature priority.
 | 5c — username permutations | [`80734f4`](https://github.com/yowanda/Reckora/commit/80734f4) | New `app/permutations.py` (4 strategies: separator, suffix, prefix, leetspeak); new `POST /api/search/permute` SSE route + `GET /api/permute/strategies`; new `permute` mode joins `list` and `graph` (with non-destructive SQLite migration); new SearchView mode toggle + per-candidate result filter |
 | 5e — outbound proxy / Tor | [`81ed51a`](https://github.com/yowanda/Reckora/commit/81ed51a) + [`4d2c470`](https://github.com/yowanda/Reckora/commit/4d2c470) | New `app/proxy.py` gate (`RECKORA_PROXY_URL` env + `proxy_enabled` admin knob) — supports `socks5://`, `socks5h://`, `http://`, `https://`; centralised httpx client construction so list/graph/permute streams + curl-cffi rescue all pick up proxy uniformly; `GET /api/health` and `GET /api/settings` expose `{configured, enabled, active, scheme}` descriptor (URL itself never leaks); Header pill "via tor" / "via http proxy" |
 | 5b — scan export | [`17b50c2`](https://github.com/yowanda/Reckora/commit/17b50c2) | New `app/exports.py` (CSV / JSON / Markdown / HTML formatters, pure stdlib); new `GET /api/history/<id>/export.<fmt>` route (auth + ownership + format whitelist + `Cache-Control: private, no-store`); ScanModal export buttons + browser-side download via object URL + `Content-Disposition` filename. PDF intentionally deferred — HTML export prints to clean A4 PDF via browser File→Print, and adding `reportlab`/`weasyprint` would pull in a multi-MB native dep stack |
-| 5a — identity types | **deferred** (next session) | email / phone / GAIA / Yandex / Skype as input alternatives to username; requires `sites.json` schema enrichment with per-site `identity_types` field, dedicated validators per type, and a SearchView identity-type picker — scoped but not started, see `reckora-progress+5.json` snapshot for handoff |
+| 5a — identity types | _this commit_ | New `app/identity.py` with per-type validators (`username` / `email` / `phone` / `gaia` / `yandex` / `skype`), normalisers, and a curated `KNOWN_IDENTITY_OVERRIDES` map (Gravatar→email, Blogger-by-GAIA→gaia, Yandex* → yandex). `sites.json` schema gains optional `identityTypes` per site (default `["username"]` keeps the catalog backwards-compatible). `SiteCatalog.filtered()` and `check_site()` accept an `identity_type` kwarg; non-username scans bypass username-shaped `regex_check` and skip the username-trained ML reranker. Per-site transforms applied before URL substitution (Gravatar email → MD5 hex). `SearchRequest` validates the identifier against the active type and normalises (email→lower, phone→digits+plus, yandex→lower). Graph + permute SSE routes reject non-username identity types at the validator layer (their extraction / permutation logic is username-specific). Frontend ships an identity-type picker dropdown next to the search input, with dynamic placeholder + per-type regex client-side validation; the picker auto-locks to `username` when graph/permute mode is selected |
 
-**Phase 5 test growth:** 115 → **144 pytest cases** (+29 across 5d/5c/5e/5b), 0 mypy errors across 16 source files, 3 Playwright e2e cases. Frontend bundle 433.11 KB / 133.28 KB gzip after all five sub-phases.
+**Phase 5 test growth:** 115 → **207 pytest cases** (+92 across 5d/5c/5e/5b/5a), 0 mypy errors across 17 source files, 3 Playwright e2e cases. Frontend bundle 434.79 KB / 133.96 KB gzip after all six sub-phases (identity-type picker + meta table adds ~1.5 KB).
 
 **Phase 1 benchmark — 100-site synthetic scan, no caching, prod HF Space.**
 

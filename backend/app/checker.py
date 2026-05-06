@@ -43,7 +43,21 @@ from typing import Any
 import httpx
 
 from .config import settings
+from .identity import (
+    DEFAULT_IDENTITY_TYPE,
+    IdentityType,
+    is_valid_username,
+    transform_identifier,
+)
 from .sites import Site
+
+__all__ = [
+    "CheckResult",
+    "Status",
+    "check_site",
+    "is_valid_username",
+    "stream_checks",
+]
 
 
 def _extract_min_confidence() -> int:
@@ -111,13 +125,6 @@ class CheckResult:
             "extracted": self.extracted,
             "ml_confidence": self.ml_confidence,
         }
-
-
-_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
-
-
-def is_valid_username(username: str) -> bool:
-    return bool(_USERNAME_RE.match(username))
 
 
 def _matches_regex(username: str, pattern: str | None) -> bool:
@@ -424,14 +431,35 @@ async def check_site(
     site: Site,
     username: str,
     *,
+    identity_type: IdentityType = DEFAULT_IDENTITY_TYPE,
     prewarm_cache: set[str] | None = None,
     prewarm_lock: asyncio.Lock | None = None,
     verify: bool = True,
     cffi_rescue: Any = None,
     extract: bool = True,
 ) -> CheckResult:
-    url = site.url.replace("{username}", username)
-    if not _matches_regex(username, site.regex_check):
+    # Phase 5a: ``username`` is now a generic *identifier* — it may be
+    # an email / phone / GAIA / Yandex / Skype id depending on
+    # ``identity_type``. The variable name is kept for backward
+    # compatibility with older callers and the SSE payload schema.
+    encoded = transform_identifier(site.name, identity_type, username)
+    url = site.url.replace("{username}", encoded)
+    if identity_type not in site.identity_types:
+        return CheckResult(
+            site=site.name,
+            status=Status.SKIPPED,
+            url=url,
+            url_main=site.url_main,
+            tags=list(site.tags),
+            error=f"site does not accept {identity_type}",
+            confidence=100,
+            signals=["identity-mismatch"],
+        )
+    # ``regex_check`` is tuned for username probes (e.g. ``^[^\.]+$``);
+    # bypassing it for non-username identity types avoids spurious
+    # SKIPPED rows on email/phone scans where the identifier intentionally
+    # contains characters the site's username regex would reject.
+    if identity_type == DEFAULT_IDENTITY_TYPE and not _matches_regex(username, site.regex_check):
         return CheckResult(
             site=site.name,
             status=Status.SKIPPED,
@@ -606,7 +634,17 @@ async def check_site(
     # answer doesn't matter. We score every other status because the
     # SPA needs a comparable second-opinion number even on UNKNOWN /
     # BLOCKED rows.
-    if primary.status is not Status.SKIPPED and settings.enable_ml_confidence:
+    #
+    # Phase 5a: the ML model is trained on username probes (regex-based
+    # features assume a username-shaped identifier). Score only username
+    # scans — non-username identity types leave ``ml_confidence`` at None
+    # so the SPA renders no second-opinion badge for those rows.
+    score_ml = (
+        primary.status is not Status.SKIPPED
+        and settings.enable_ml_confidence
+        and identity_type == DEFAULT_IDENTITY_TYPE
+    )
+    if score_ml:
         from . import ml as _ml
 
         try:
@@ -638,11 +676,19 @@ async def stream_checks(
     sites: list[Site],
     username: str,
     *,
+    identity_type: IdentityType = DEFAULT_IDENTITY_TYPE,
     client: httpx.AsyncClient | None = None,
     verify: bool = True,
     extract: bool = True,
 ) -> AsyncIterator[CheckResult]:
     """Run checks concurrently and yield each result as it arrives.
+
+    ``identity_type`` (Phase 5a) selects which kind of identifier
+    ``username`` is — defaults to ``"username"`` for backwards compat
+    with Phase 1-4 callers. Per-site probe behaviour is the same; the
+    checker just routes the value through ``transform_identifier``
+    before substitution and skips the username-shaped ``regex_check``
+    on non-username scans.
 
     ``verify`` toggles the Phase 2 second-stage probe for borderline
     CLAIMED results (default on; ``False`` for tests / latency-sensitive
@@ -690,6 +736,7 @@ async def stream_checks(
                     client,
                     site,
                     username,
+                    identity_type=identity_type,
                     prewarm_cache=prewarm_cache,
                     prewarm_lock=prewarm_lock,
                     verify=verify,
@@ -700,7 +747,10 @@ async def stream_checks(
                 result = CheckResult(
                     site=site.name,
                     status=Status.ERROR,
-                    url=site.url.replace("{username}", username),
+                    url=site.url.replace(
+                        "{username}",
+                        transform_identifier(site.name, identity_type, username),
+                    ),
                     url_main=site.url_main,
                     tags=list(site.tags),
                     error=type(e).__name__,

@@ -1,5 +1,76 @@
 export type Status = 'claimed' | 'free' | 'unknown' | 'blocked' | 'error' | 'skipped'
 
+// ---------------------------------------------------------------------------
+// Phase 5a: identity types. Mirrors ``backend/app/identity.py``. The
+// SPA's picker swaps the search input's placeholder + ``pattern``
+// attribute based on the active value; the backend re-validates the
+// pair on every search request.
+// ---------------------------------------------------------------------------
+
+export type IdentityType = 'username' | 'email' | 'phone' | 'gaia' | 'yandex' | 'skype'
+
+export const IDENTITY_TYPES: readonly IdentityType[] = [
+  'username',
+  'email',
+  'phone',
+  'gaia',
+  'yandex',
+  'skype',
+] as const
+
+export interface IdentityTypeMeta {
+  key: IdentityType
+  label: string
+  placeholder: string
+  pattern: string // RegExp source mirrored from backend identity.py
+  hint: string
+}
+
+export const IDENTITY_TYPE_META: Record<IdentityType, IdentityTypeMeta> = {
+  username: {
+    key: 'username',
+    label: 'username',
+    placeholder: 'enter a username, e.g. github, torvalds, jack',
+    pattern: '^[A-Za-z0-9_.-]{1,64}$',
+    hint: 'letters, digits, _ . - (max 64 chars)',
+  },
+  email: {
+    key: 'email',
+    label: 'email',
+    placeholder: 'enter an email, e.g. alice@example.com',
+    pattern: '^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}$',
+    hint: 'RFC 5321 addr-spec — local@domain.tld',
+  },
+  phone: {
+    key: 'phone',
+    label: 'phone',
+    placeholder: 'enter a phone in E.164, e.g. +12025551234',
+    pattern: '^\\+[1-9][0-9]{6,14}$',
+    hint: 'E.164: leading + then 7-15 digits, no spaces',
+  },
+  gaia: {
+    key: 'gaia',
+    label: 'GAIA id',
+    placeholder: 'enter a 21-digit Google account id',
+    pattern: '^[0-9]{21}$',
+    hint: 'Google Account / GAIA — exactly 21 digits',
+  },
+  yandex: {
+    key: 'yandex',
+    label: 'Yandex id',
+    placeholder: 'enter a 16-char Yandex public_id',
+    pattern: '^[a-z0-9]{16}$',
+    hint: 'Yandex public_id — 16 lowercase alphanumerics',
+  },
+  skype: {
+    key: 'skype',
+    label: 'Skype',
+    placeholder: 'enter a Skype name, e.g. live:johndoe',
+    pattern: '^(?:live:)?[A-Za-z0-9_.\\-]{6,32}$',
+    hint: 'Skype name — 6-32 chars, optional ``live:`` prefix',
+  },
+}
+
 export interface CheckResult {
   site: string
   status: Status
