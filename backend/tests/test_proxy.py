@@ -50,9 +50,7 @@ def reset_proxy_state(client: TestClient) -> Iterator[None]:
     finally:
         settings.proxy_url = saved_url  # type: ignore[misc]
         if saved_override is not None:
-            admin_settings_mod.set_override(
-                "proxy_enabled", saved_override, actor="test-fixture"
-            )
+            admin_settings_mod.set_override("proxy_enabled", saved_override, actor="test-fixture")
         else:
             admin_settings_mod.delete_override("proxy_enabled")
 
