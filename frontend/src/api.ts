@@ -1,5 +1,12 @@
 import { ApiError } from './types'
-import type { CheckResult, Member, Role, SitesResponse } from './types'
+import type {
+  CheckResult,
+  GraphEdge,
+  GraphExtracted,
+  Member,
+  Role,
+  SitesResponse,
+} from './types'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
 
@@ -159,7 +166,7 @@ export async function streamSearch(
   if (buffer.trim()) handleSseChunk(buffer, events)
 }
 
-function handleSseChunk(chunk: string, events: SearchEvents) {
+function handleSseChunk(chunk: string, events: SearchEvents | GraphSearchEvents) {
   let event = 'message'
   const dataLines: string[] = []
   for (const raw of chunk.split('\n')) {
@@ -173,18 +180,107 @@ function handleSseChunk(chunk: string, events: SearchEvents) {
   } catch {
     return
   }
+  const e = events as GraphSearchEvents
   switch (event) {
     case 'start':
-      events.onStart?.(data as { username: string; total: number })
+      e.onStart?.(data as { username: string; total: number; depth?: number })
       break
     case 'result':
-      events.onResult?.(data as CheckResult)
+      e.onResult?.(data as CheckResult)
+      break
+    case 'extracted':
+      e.onExtracted?.(data as GraphExtracted)
+      break
+    case 'edge':
+      e.onEdge?.(data as GraphEdge)
+      break
+    case 'secondary_start':
+      e.onSecondaryStart?.(
+        data as { parent_username: string; child_username: string; total: number },
+      )
       break
     case 'done':
-      events.onDone?.(data as { results: number; cached?: boolean })
+      e.onDone?.(
+        data as { results: number; cached?: boolean; edges?: number; secondary_count?: number },
+      )
       break
     case 'error':
-      events.onError?.(String((data as { detail?: string }).detail ?? data))
+      e.onError?.(String((data as { detail?: string }).detail ?? data))
       break
   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: graph search (recursive identity discovery)
+// ---------------------------------------------------------------------------
+
+export interface GraphSearchEvents extends SearchEvents {
+  onExtracted?: (e: GraphExtracted) => void
+  onEdge?: (e: GraphEdge) => void
+  onSecondaryStart?: (info: {
+    parent_username: string
+    child_username: string
+    total: number
+  }) => void
+  onDone?: (info: {
+    results: number
+    cached?: boolean
+    edges?: number
+    secondary_count?: number
+  }) => void
+}
+
+export async function streamGraphSearch(
+  payload: {
+    username: string
+    tags: string[]
+    limit: number
+    depth?: number
+    max_secondary?: number
+  },
+  events: GraphSearchEvents,
+): Promise<void> {
+  const r = await fetch(`${API_BASE}/api/search/graph`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify(payload),
+    signal: events.signal,
+  })
+
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    let detail = `HTTP ${r.status}`
+    try {
+      const j = JSON.parse(text)
+      if (j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+    } catch {
+      if (text) detail = text
+    }
+    events.onError?.(detail)
+    return
+  }
+
+  if (!r.body) {
+    events.onError?.('streaming not supported')
+    return
+  }
+
+  const reader = r.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    let idx
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const chunk = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      handleSseChunk(chunk, events)
+    }
+  }
+  if (buffer.trim()) handleSseChunk(buffer, events)
 }

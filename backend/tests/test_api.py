@@ -214,3 +214,96 @@ def test_api_responses_are_not_clobbered_by_cache_middleware(client: TestClient)
     cc = r.headers.get("cache-control", "")
     assert "immutable" not in cc
     assert "max-age=31536000" not in cc
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: graph search endpoint smoke tests.
+# ---------------------------------------------------------------------------
+
+
+def _parse_sse(stream: str) -> list[dict[str, str]]:
+    """Tiny SSE parser: returns ``[{"event": ..., "data": ...}, ...]``.
+
+    Sufficient for these smoke tests; ignores comments and id: lines.
+    """
+    events = []
+    for chunk in stream.split("\n\n"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        ev = "message"
+        data_lines = []
+        for line in chunk.splitlines():
+            if line.startswith("event:"):
+                ev = line[6:].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[5:].strip())
+        events.append({"event": ev, "data": "\n".join(data_lines)})
+    return events
+
+
+def test_search_graph_requires_auth(client: TestClient) -> None:
+    r = client.post("/api/search/graph", json={"username": "alice"})
+    assert r.status_code == 401
+
+
+def test_search_graph_validates_depth(client: TestClient, admin_token: str) -> None:
+    r = client.post(
+        "/api/search/graph",
+        json={"username": "alice", "depth": 5, "limit": 1},
+        headers=_hdr(admin_token),
+    )
+    assert r.status_code == 422
+
+
+def test_search_graph_emits_start_and_done(
+    client: TestClient,
+    admin_token: str,
+) -> None:
+    """Stream must always emit a ``start`` event and a terminal ``done``,
+    even when every site errors out (offline CI)."""
+    import json as _json
+
+    r = client.post(
+        "/api/search/graph",
+        json={"username": "alice", "limit": 2, "depth": 1},
+        headers=_hdr(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    events = _parse_sse(r.text)
+    kinds = [e["event"] for e in events]
+    assert kinds[0] == "start"
+    assert kinds[-1] == "done"
+    start_payload = _json.loads(events[0]["data"])
+    assert start_payload["username"] == "alice"
+    assert start_payload["depth"] in (0, 1)
+    done_payload = _json.loads(events[-1]["data"])
+    assert "results" in done_payload
+    assert "edges" in done_payload
+
+
+def test_search_graph_zero_depth_skips_recursion(
+    client: TestClient,
+    admin_token: str,
+) -> None:
+    """``depth=0`` must collapse the endpoint to a single-pass scan with no
+    ``edge`` or ``secondary_start`` events emitted regardless of CLAIMED
+    hits — useful for clients that only want extracted identifiers."""
+    import json as _json
+
+    r = client.post(
+        "/api/search/graph",
+        json={"username": "alice", "limit": 1, "depth": 0},
+        headers=_hdr(admin_token),
+    )
+    assert r.status_code == 200, r.text
+    events = _parse_sse(r.text)
+    kinds = [e["event"] for e in events]
+    assert "edge" not in kinds
+    assert "secondary_start" not in kinds
+    assert "extracted" not in kinds
+    assert kinds[0] == "start"
+    assert kinds[-1] == "done"
+    done_payload = _json.loads(events[-1]["data"])
+    assert done_payload["edges"] == 0
+    assert done_payload["secondary_count"] == 0

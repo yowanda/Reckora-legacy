@@ -401,6 +401,162 @@ async def search(
     )
 
 
+# ---------------------------------------------------------------------------
+# Phase 3: graph search — recursive identity discovery + react-flow payload.
+# ---------------------------------------------------------------------------
+
+
+class GraphSearchRequest(SearchRequest):
+    """Same as ``SearchRequest`` plus per-call recursion knobs.
+
+    ``depth=0`` collapses to a regular search; ``depth>=1`` runs sub-scans
+    on secondary usernames extracted from the primary CLAIMED hits.
+    """
+
+    depth: int = Field(default=1, ge=0, le=2)
+    max_secondary: int | None = Field(default=None, ge=1, le=20)
+
+
+async def _graph_search_stream(
+    req: GraphSearchRequest,
+    catalog: SiteCatalog,
+) -> AsyncIterator[bytes]:
+    sites = catalog.filtered(tags=req.tags, limit=req.limit)
+    yield _sse_event(
+        "start",
+        {
+            "username": req.username,
+            "total": len(sites),
+            "depth": min(req.depth, settings.graph_max_depth),
+        },
+    )
+    if not sites:
+        yield _sse_event("done", {"results": 0, "edges": 0})
+        return
+
+    max_secondary = min(
+        req.max_secondary or settings.graph_max_secondary,
+        settings.graph_max_secondary,
+    )
+    effective_depth = min(req.depth, settings.graph_max_depth)
+
+    primary_results: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    discovered: dict[str, str] = {}  # child_username -> source description
+
+    async with httpx.AsyncClient(
+        timeout=settings.request_timeout,
+        http2=True,
+        limits=httpx.Limits(
+            max_connections=settings.total_concurrency,
+            max_keepalive_connections=settings.total_concurrency,
+        ),
+        follow_redirects=True,
+    ) as client:
+        # ---- depth 0: primary scan ------------------------------------
+        seed_hits: list[tuple[str, dict[str, Any]]] = []  # (parent, payload)
+        async for result in stream_checks(sites, req.username, client=client):
+            payload = result.to_dict()
+            payload["parent_username"] = None
+            primary_results.append(payload)
+            yield _sse_event("result", payload)
+            if (
+                effective_depth >= 1
+                and result.status.value == "claimed"
+                and result.extracted
+                and len(seed_hits) < settings.graph_max_seed_hits
+            ):
+                seed_hits.append((req.username, payload))
+
+        # ---- depth 1: extract + sub-scan ------------------------------
+        if effective_depth >= 1 and seed_hits:
+            from .extractor import find_secondary_usernames
+
+            sub_targets: list[tuple[str, str, dict[str, Any]]] = []
+            for parent_username, payload in seed_hits:
+                extracted = payload.get("extracted") or {}
+                yield _sse_event(
+                    "extracted",
+                    {
+                        "parent_username": parent_username,
+                        "site": payload["site"],
+                        "url": payload["url"],
+                        "fields": extracted,
+                    },
+                )
+                for child_username, evidence in find_secondary_usernames(
+                    extracted, parent_username
+                ):
+                    if child_username in discovered:
+                        continue
+                    if not is_valid_username(child_username):
+                        continue
+                    if len([t for t in sub_targets if t[0] == parent_username]) >= max_secondary:
+                        break
+                    discovered[child_username] = evidence
+                    edge = {
+                        "parent_username": parent_username,
+                        "child_username": child_username,
+                        "evidence": evidence,
+                        "source_site": payload["site"],
+                    }
+                    edges.append(edge)
+                    yield _sse_event("edge", edge)
+                    sub_targets.append((parent_username, child_username, payload))
+
+            for parent_username, child_username, _payload in sub_targets:
+                yield _sse_event(
+                    "secondary_start",
+                    {
+                        "parent_username": parent_username,
+                        "child_username": child_username,
+                        "total": len(sites),
+                    },
+                )
+                # Sub-scans don't recurse further (depth-1 hard cap) and
+                # skip extraction to keep payload size bounded.
+                async for sub in stream_checks(
+                    sites,
+                    child_username,
+                    client=client,
+                    extract=False,
+                ):
+                    sub_payload = sub.to_dict()
+                    sub_payload["parent_username"] = child_username
+                    sub_payload["discovered_via"] = parent_username
+                    yield _sse_event("result", sub_payload)
+
+    yield _sse_event(
+        "done",
+        {
+            "results": len(primary_results),
+            "edges": len(edges),
+            "secondary_count": len(discovered),
+        },
+    )
+
+
+@app.post("/api/search/graph")
+@limiter.limit(settings.search_rate_limit)
+async def search_graph(
+    request: Request,
+    body: GraphSearchRequest,
+    catalog: SiteCatalog = Depends(get_catalog),
+    _: Member = Depends(current_member),
+) -> StreamingResponse:
+    if not catalog.sites:
+        raise HTTPException(503, "site catalog unavailable")
+    return StreamingResponse(
+        _graph_search_stream(body, catalog),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 _static_dir = settings.static_dir
 if _static_dir and _static_dir.exists():
     _index_html = _static_dir / "index.html"

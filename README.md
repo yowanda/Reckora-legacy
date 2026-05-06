@@ -37,7 +37,7 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 — coverage & precision wins | shipped (ed584e4) | **2,506** ↑ from 555 | 0–100 score | yes | — | — | — | — | — |
 | 2 — anti-bot & verify | shipped (bd7b768) | 2,506 | 0–100 | yes | yes (Firefox UA + rotated referrer) | yes (~928 sites) | yes (curl-cffi chrome131) | — | — |
-| 3 — extraction & graph | planned | 2,506 | 0–100 | yes | yes | yes | yes | yes (socid_extractor + react-flow) | — |
+| 3 — extraction & graph | shipped | 2,506 | 0–100 | yes | yes | yes | yes | **yes (socid_extractor + react-flow)** | — |
 | 4 — beyond maigret | planned | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes | yes (ONNX) + admin live DB editor + scan-history diff |
 
 **Phase 1 benchmark — 100-site synthetic scan, no caching, prod HF Space.**
@@ -64,6 +64,21 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | BLOCKED → CLAIMED/FREE rescued (curl-cffi) | 0 | **2 / 50** | Flickr family rescued from 429 via Chrome TLS impersonation |
 | Cookie-jar prewarm hosts | 0 | **~928** sites flagged | XenForo / vBulletin / uCoz / Discourse engines auto-tagged |
 | SSE payload / 100 sites | 30 KB | **32 KB** | +7 % (verify + cffi-rescue signals + ``verified`` field) |
+
+**Phase 3 benchmark — same 100-site scan; primary mode, then ``/api/search/graph`` with depth-1 recursion.**
+
+| Metric | Phase 2 | Phase 3 (list) | Phase 3 (graph) | Δ vs phase 2 |
+| --- | --- | --- | --- | --- |
+| 100-site scan total wall (primary only) | 26.3 s | **25.8 s** | 25.8 s | −2 % (extraction is sync on already-fetched body, no extra I/O) |
+| CLAIMED hits / 100 (real username "torvalds") | n/a | **28** | 28 | comparable to phase 2 |
+| **CLAIMED with extracted identifiers** | 0 | **17 / 28 (61 %)** | 17 / 28 (61 %) | brand-new signal: real names, bios, alt-platform links, emails |
+| Identifier fields per CLAIMED extract (median) | 0 | **4** | 4 | e.g. ``fullname`` + ``bio`` + ``profile_url`` + ``avatar_url`` |
+| Graph mode total wall (depth-1, "soxoj") | n/a | n/a | **51.9 s** | 1× primary + 1× sub-scan for the discovered alt |
+| **Secondary usernames discovered (depth-1)** | n/a | n/a | **1 unique** ("sox0j") | recursion correctly surfaces typo-variant aliases without manual hinting |
+| Recursion edges emitted | n/a | n/a | **1** | parent → child link with evidence signal (``link:mastodon`` etc.) |
+| SSE payload / 100 sites (list mode) | 32 KB | **35 KB** | 35 KB | +9 % (extracted dict per CLAIMED) |
+| SSE payload / graph scan with 1 sub-scan | n/a | n/a | **81 KB** | primary 35 KB + extracted events 1 KB + secondary 35 KB + chrome 10 KB |
+| Recursion safety caps | n/a | n/a | **depth ≤ 1, max 5 secondary per parent, max 8 seed hits** | bounded fanout; sub-scans skip extraction to keep payload small |
 
 Maigret comparison ([details](./comparison-maigret.md)): Reckora's catalog
 is now within 20 % of maigret's 3,154 (we still drop maigret's 644

@@ -24,6 +24,8 @@ dependencies = [
     "python-multipart>=0.0.7",
     "email-validator>=2.0.0",
     "curl-cffi>=0.7.0",
+    # Phase 3: profile-identity extraction from CLAIMED page bodies.
+    "socid-extractor>=0.0.28",
 ]
 
 [project.optional-dependencies]

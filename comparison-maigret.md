@@ -13,10 +13,10 @@ Pulled directly from the source trees:
 | Goal | A small **multi-tenant web app** that streams username-availability checks to a browser, gated by login. | A CLI **OSINT toolkit** that produces a full *dossier* on a target identity, with a thin web UI as a side mode. |
 | Primary surface | HTTPS + SSE web API + React SPA (single-origin). | `maigret` console command (3,000+-site scan). Flask web UI is optional. |
 | Code size (Python) | ~1,135 LOC across 6 modules. | ~6,132 LOC across 14 modules — ~5.4× larger. |
-| Sites | 555 curated sites *derived* from Maigret’s DB (`backend/scripts/build_sites.py`, MIT). | 3,154 native sites + 13 shared engines. |
+| Sites | **2,506 curated sites** *derived* from Maigret’s DB (`backend/scripts/build_sites.py`, MIT). | 3,154 native sites + 13 shared engines. |
 | Identity types | usernames only (`a-zA-Z0-9._-`, length 1–64). | usernames, emails, GAIA IDs, phones, Yandex IDs, … (`--id-type`), plus URL parsing & permutation. |
-| Recursive enrichment | none. | yes — extracts other IDs from profile pages and re-scans. |
-| Reporting | streamed JSON only (consumer renders cards in-browser). | TXT, CSV, HTML, JSON, Markdown, PDF, XMind, Graph (PyVis), AI summary. |
+| Recursive enrichment | **yes** (Phase 3) — `socid_extractor` integration on every CLAIMED hit (61 % of CLAIMED yield identifiers), depth-1 graph recursion, **edges + extracted events emitted on the SSE stream**. Bounded fanout (≤ 8 seed hits × ≤ 5 secondary). | yes — extracts other IDs from profile pages and re-scans, no fanout cap by default. |
+| Reporting | **streamed JSON + interactive react-flow graph view** (consumer renders cards or graph in-browser). | TXT, CSV, HTML, JSON, Markdown, PDF, XMind, Graph (PyVis), AI summary. |
 | Auth | mandatory members-only login (admin-managed). | none (it’s a local CLI). |
 | Deploy target | one Docker image → HF Space / Fly.io. | `pip install maigret`, plus a Docker stage for the optional web UI. |
 | Async runtime | `httpx.AsyncClient` + asyncio task pool. | `aiohttp` + a custom `CheckerBase` hierarchy (incl. cloudscraper / curl-cffi for WAF-evading runs). |
@@ -158,7 +158,7 @@ For each `(Site, username)` pair:
 5. concurrency is bounded by `httpx.Limits` + an asyncio semaphore in `stream_checks`.
 
 Dimensions explicitly **not** present:
-- no follow-on profile parsing (no `socid_extractor` integration),
+- ~~no follow-on profile parsing (no `socid_extractor` integration)~~ — **added in phase 3**: every CLAIMED hit with confidence ≥ 70 runs through `extract_identifiers()` (socid_extractor + OG meta + email/social-link mining). Surfaced via `extracted` field on `CheckResult` and `event: extracted` / `event: edge` on `/api/search/graph`.
 - no per-site cookie jar,
 - no proxy support per site,
 - no `requestHeadOnly` short-circuit,
@@ -201,6 +201,7 @@ So Maigret’s pipeline is a multi-pass enrichment loop; Reckora’s is a single
   - `GET /api/admin/members`, `POST /api/admin/members`, `PATCH /api/admin/members/{u}`, `DELETE /api/admin/members/{u}` (admin-only).
   - `GET /api/sites` — catalog with tag counts.
   - `POST /api/search` — SSE stream of `start`, `result*`, `done` events; rate-limited.
+  - `POST /api/search/graph` — SSE stream of `start`, `result*`, `extracted*`, `edge*`, `secondary_start*`, `done` events for depth-1 recursive identity discovery (Phase 3).
   - `GET /api/health` — public liveness.
 - **Swagger** at `/docs`, ReDoc at `/redoc`.
 
@@ -232,10 +233,10 @@ So Maigret’s pipeline is a multi-pass enrichment loop; Reckora’s is a single
 | HTML | ✅ (the SPA *is* the HTML report) | ✅ standalone (`-H`) |
 | Markdown | ❌ | ✅ (`-M`) |
 | PDF | ❌ | ✅ (`-P`, via `xhtml2pdf`/`reportlab`) |
-| Graph (network of accounts/IDs) | ❌ | ✅ (`-G`, via `networkx` + `pyvis`) |
+| Graph (network of accounts/IDs) | **✅ live, in-browser** (`@xyflow/react` canvas, edges streamed in via `/api/search/graph`) | ✅ standalone HTML (`-G`, via `networkx` + `pyvis`) |
 | XMind mind-map | ❌ | ✅ (`-X`) |
 | AI narrative summary | ❌ | ✅ (`--ai`, OpenAI-compatible) |
-| Profile-page extraction | ❌ | ✅ (`socid_extractor`) |
+| Profile-page extraction | **✅ (`socid_extractor` + OG/email/social-link mining)** | ✅ (`socid_extractor`) |
 
 Reckora’s “report” is the live grid in the SPA + the consumer’s ability to read the SSE stream programmatically; there is no offline artefact.
 
@@ -289,7 +290,7 @@ Reading `build_sites.py` and the slim `Site` dataclass tells you which Maigret f
 - Disabled sites (`disabled: true` is dropped).
 - Activation / cookies (`activation` field is dropped — these are sites that need a one-time captcha / login flow).
 - HEAD-only requests (`request_head_only` is allowed in the dataclass but the checker doesn’t do anything special with it).
-- Profile-page parsing & recursion (no `socid_extractor` dependency at all).
+- ~~Profile-page parsing & recursion (no `socid_extractor` dependency at all).~~ — **shipped in phase 3** with hard caps on fanout (depth ≤ 1, ≤ 5 secondary usernames per parent, ≤ 8 seed CLAIMED hits).
 - Permutation, ignore-list, ID-type variants, URL parsing.
 - Tor / I2P / SOCKS5 proxies, custom CA bundles, browser-fingerprinting clients.
 - Heavy reporting (PDF/Graph/XMind/Markdown/AI) — replaced with “consumer renders the stream however it wants.”

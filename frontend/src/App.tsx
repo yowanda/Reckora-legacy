@@ -4,15 +4,34 @@ import { SearchBar } from './components/SearchBar'
 import { TagFilter } from './components/TagFilter'
 import { ResultCard } from './components/ResultCard'
 import { Stats } from './components/Stats'
+import { GraphView } from './components/GraphView'
 import { Disclaimer } from './components/Disclaimer'
 import { LoginPage } from './components/LoginPage'
 import { AdminPanel } from './components/AdminPanel'
-import { fetchSites, streamSearch } from './api'
+import { fetchSites, streamGraphSearch, streamSearch } from './api'
 import { useAuth } from './auth-context'
-import type { CheckResult, SearchProgress, SitesResponse } from './types'
+import type {
+  CheckResult,
+  GraphEdge,
+  GraphExtracted,
+  GraphProgress,
+  SearchProgress,
+  SitesResponse,
+} from './types'
 
 type StatusFilter = 'all' | 'claimed' | 'free' | 'unknown' | 'blocked' | 'error'
 type View = 'search' | 'admin'
+type Mode = 'list' | 'graph'
+
+const INITIAL_GRAPH: GraphProgress = {
+  username: '',
+  state: 'idle',
+  results: [],
+  edges: [],
+  extracted: [],
+  secondaryScans: {},
+  doneCount: 0,
+}
 
 export default function App() {
   const { ready, member } = useAuth()
@@ -46,12 +65,14 @@ function SearchView() {
   const [catalog, setCatalog] = useState<SitesResponse | null>(null)
   const [tags, setTags] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [mode, setMode] = useState<Mode>('list')
   const [progress, setProgress] = useState<SearchProgress>({
     total: 0,
     done: 0,
     results: [],
     state: 'idle',
   })
+  const [graphProgress, setGraphProgress] = useState<GraphProgress>(INITIAL_GRAPH)
   const [username, setUsername] = useState<string>('')
   const abortRef = useRef<AbortController | null>(null)
 
@@ -66,8 +87,55 @@ function SearchView() {
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setUsername(name)
-    setProgress({ total: 0, done: 0, results: [], state: 'running' })
 
+    if (mode === 'graph') {
+      setGraphProgress({ ...INITIAL_GRAPH, username: name, state: 'running' })
+      setProgress({ total: 0, done: 0, results: [], state: 'running' })
+      streamGraphSearch(
+        { username: name, tags, limit: 250, depth: 1 },
+        {
+          signal: ctrl.signal,
+          onStart: ({ total }) =>
+            setProgress((p) => ({ ...p, total, state: 'running' })),
+          onResult: (r: CheckResult) => {
+            setGraphProgress((g) => ({
+              ...g,
+              results: [...g.results, r],
+              doneCount: g.doneCount + 1,
+            }))
+            // Surface primary results in the list view too so the user can
+            // toggle between modes after the scan finishes.
+            if (!r.parent_username) {
+              setProgress((p) => ({
+                ...p,
+                done: p.done + 1,
+                results: [...p.results, r],
+              }))
+            }
+          },
+          onExtracted: (e: GraphExtracted) =>
+            setGraphProgress((g) => ({ ...g, extracted: [...g.extracted, e] })),
+          onEdge: (e: GraphEdge) =>
+            setGraphProgress((g) => ({ ...g, edges: [...g.edges, e] })),
+          onSecondaryStart: ({ child_username, total }) =>
+            setGraphProgress((g) => ({
+              ...g,
+              secondaryScans: { ...g.secondaryScans, [child_username]: total },
+            })),
+          onDone: () => {
+            setGraphProgress((g) => ({ ...g, state: 'done' }))
+            setProgress((p) => ({ ...p, state: 'done' }))
+          },
+          onError: (msg) => {
+            setGraphProgress((g) => ({ ...g, state: 'error', error: msg }))
+            setProgress((p) => ({ ...p, state: 'error', error: msg }))
+          },
+        },
+      )
+      return
+    }
+
+    setProgress({ total: 0, done: 0, results: [], state: 'running' })
     streamSearch(
       { username: name, tags, limit: 250 },
       {
@@ -89,6 +157,7 @@ function SearchView() {
   function stopSearch() {
     abortRef.current?.abort()
     setProgress((p) => ({ ...p, state: 'done' }))
+    setGraphProgress((g) => (g.state === 'running' ? { ...g, state: 'done' } : g))
   }
 
   const sortedResults = useMemo(() => {
@@ -156,6 +225,32 @@ function SearchView() {
         )}
       </section>
 
+      <section className="mx-auto mt-3 flex max-w-3xl items-center gap-1.5">
+        <span className="mr-1 text-xs uppercase tracking-wider text-zinc-500">view</span>
+        {(['list', 'graph'] as Mode[]).map((m) => (
+          <button
+            key={m}
+            type="button"
+            disabled={isRunning && m !== mode}
+            className={
+              'chip transition ' +
+              (mode === m
+                ? '!border-accent !bg-accent/15 !text-white'
+                : 'hover:!text-white disabled:opacity-50')
+            }
+            onClick={() => setMode(m)}
+            title={m === 'graph' ? 'recursive identity-graph view (Phase 3)' : undefined}
+          >
+            {m}
+          </button>
+        ))}
+        {mode === 'graph' && (
+          <span className="ml-2 text-[10px] text-zinc-500">
+            depth-1 recursion · scans up to {5} secondary usernames
+          </span>
+        )}
+      </section>
+
       {progress.state !== 'idle' && (
         <section className="mx-auto mt-8 max-w-5xl space-y-4">
           <Stats progress={progress} />
@@ -166,35 +261,43 @@ function SearchView() {
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-xs uppercase tracking-wider text-zinc-500">show</span>
-            {(['all', 'claimed', 'unknown', 'blocked', 'free', 'error'] as StatusFilter[]).map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={
-                  'chip transition ' +
-                  (statusFilter === s
-                    ? '!border-accent !bg-accent/15 !text-white'
-                    : 'hover:!text-white')
-                }
-                onClick={() => setStatusFilter(s)}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
+          {mode === 'graph' ? (
+            <GraphView progress={graphProgress} />
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-xs uppercase tracking-wider text-zinc-500">show</span>
+                {(['all', 'claimed', 'unknown', 'blocked', 'free', 'error'] as StatusFilter[]).map(
+                  (s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={
+                        'chip transition ' +
+                        (statusFilter === s
+                          ? '!border-accent !bg-accent/15 !text-white'
+                          : 'hover:!text-white')
+                      }
+                      onClick={() => setStatusFilter(s)}
+                    >
+                      {s}
+                    </button>
+                  ),
+                )}
+              </div>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {visibleResults.map((r) => (
-              <ResultCard key={r.site} r={r} />
-            ))}
-          </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {visibleResults.map((r) => (
+                  <ResultCard key={r.site} r={r} />
+                ))}
+              </div>
 
-          {visibleResults.length === 0 && progress.state === 'done' && (
-            <p className="text-center text-sm text-zinc-500">
-              no results match the current filter.
-            </p>
+              {visibleResults.length === 0 && progress.state === 'done' && (
+                <p className="text-center text-sm text-zinc-500">
+                  no results match the current filter.
+                </p>
+              )}
+            </>
           )}
         </section>
       )}

@@ -159,6 +159,22 @@ class CffiRescue:
         fake = _FakeResp(resp.status_code, str(resp.url))
         status, signals = _classify_response(fake, body, site)  # type: ignore[arg-type]
         signals = ["cffi-rescue", *signals]
+        confidence = _confidence(site, status, resp.status_code, signals)
+        # Phase 3: rescued CLAIMED hits should still produce identity
+        # extracts; the body we just got from curl-cffi is the highest-trust
+        # body we'll have for these sites.
+        extracted: dict[str, str] | None = None
+        if (
+            status is Status.CLAIMED
+            and confidence >= settings.extract_min_confidence
+            and body
+        ):
+            from .extractor import extract_identifiers
+
+            try:
+                extracted = extract_identifiers(body, url)
+            except Exception:  # pragma: no cover
+                extracted = {}
         return CheckResult(
             site=site.name,
             status=status,
@@ -167,8 +183,9 @@ class CffiRescue:
             tags=list(site.tags),
             http_status=resp.status_code,
             elapsed_ms=int((time.perf_counter() - started) * 1000),
-            confidence=_confidence(site, status, resp.status_code, signals),
+            confidence=confidence,
             signals=signals,
+            extracted=extracted,
         )
 
 

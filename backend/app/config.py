@@ -42,6 +42,18 @@ class Settings(BaseSettings):
     enable_curl_cffi: bool = True
     cffi_impersonate: str = "chrome131"
     cffi_timeout: float = 8.0
+    # Phase 3: identity extraction and graph recursion knobs.
+    # ``extract_min_confidence`` is the smallest CLAIMED confidence we will
+    # run the extractor on — below this we treat the result as too noisy
+    # to surface identifiers from. ``graph_max_depth=1`` and
+    # ``graph_max_secondary=5`` together cap the worst-case graph search
+    # at 1 + N*5 scans where N is the number of root CLAIMED hits with
+    # extractable secondary usernames; in practice we cap N before
+    # spreading via ``graph_max_seed_hits``.
+    extract_min_confidence: int = 70
+    graph_max_depth: int = 1
+    graph_max_secondary: int = 5
+    graph_max_seed_hits: int = 8
 
 
 settings = Settings()

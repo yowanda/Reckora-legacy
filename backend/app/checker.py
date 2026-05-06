@@ -73,6 +73,11 @@ class CheckResult:
     # agreed with the primary classification. ``False`` = the second
     # probe disagreed; primary classification is downgraded to UNKNOWN.
     verified: bool | None = None
+    # Phase 3: structured identity fields pulled from the page body for
+    # CLAIMED hits with sufficient confidence. ``None`` = extraction
+    # didn't run (status wasn't CLAIMED, body unavailable, or confidence
+    # too low). ``{}`` = ran but the page yielded no recognised fields.
+    extracted: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -88,6 +93,7 @@ class CheckResult:
             "signals": self.signals,
             "attempts": self.attempts,
             "verified": self.verified,
+            "extracted": self.extracted,
         }
 
 
@@ -406,6 +412,7 @@ async def check_site(
     prewarm_lock: asyncio.Lock | None = None,
     verify: bool = True,
     cffi_rescue: Any = None,
+    extract: bool = True,
 ) -> CheckResult:
     url = site.url.replace("{username}", username)
     if not _matches_regex(username, site.regex_check):
@@ -565,6 +572,22 @@ async def check_site(
         primary = await _verify_check(client, site, primary)
         # Verify time included so the caller sees the true latency.
         primary.elapsed_ms = int((time.perf_counter() - started) * 1000)
+    # Phase 3: extract identity fields from the body of confident CLAIMED
+    # hits. The cost is regex-only (no extra HTTP), so the only reason to
+    # gate on confidence is to avoid surfacing identifiers from probable
+    # false positives.
+    if (
+        extract
+        and primary.status is Status.CLAIMED
+        and primary.confidence >= settings.extract_min_confidence
+        and body
+    ):
+        from .extractor import extract_identifiers
+
+        try:
+            primary.extracted = extract_identifiers(body, primary.url)
+        except Exception:  # pragma: no cover - extractor must never break a scan
+            primary.extracted = {}
     return primary
 
 
@@ -574,12 +597,17 @@ async def stream_checks(
     *,
     client: httpx.AsyncClient | None = None,
     verify: bool = True,
+    extract: bool = True,
 ) -> AsyncIterator[CheckResult]:
     """Run checks concurrently and yield each result as it arrives.
 
     ``verify`` toggles the Phase 2 second-stage probe for borderline
     CLAIMED results (default on; ``False`` for tests / latency-sensitive
     callers that want raw first-pass classification).
+
+    ``extract`` toggles the Phase 3 identity-extraction step on confident
+    CLAIMED hits (default on; ``False`` keeps ``CheckResult.extracted``
+    as ``None`` and skips the regex pass entirely).
     """
     owned_client = client is None
     if owned_client:
@@ -623,6 +651,7 @@ async def stream_checks(
                     prewarm_lock=prewarm_lock,
                     verify=verify,
                     cffi_rescue=cffi_rescue,
+                    extract=extract,
                 )
             except Exception as e:
                 result = CheckResult(

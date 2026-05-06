@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { CheckResult, Status } from '../types'
 
 const statusMeta: Record<Status, { label: string; className: string; dot: string }> = {
@@ -13,65 +14,102 @@ export function ResultCard({ r }: { r: CheckResult }) {
   const meta = statusMeta[r.status]
   const host = safeHost(r.url_main)
   const favicon = host ? `https://www.google.com/s2/favicons?domain=${host}&sz=64` : ''
+  const [showExtracted, setShowExtracted] = useState(false)
+  const extractedEntries = r.extracted ? Object.entries(r.extracted) : []
+  const hasExtracted = extractedEntries.length > 0
 
   return (
-    <a
-      href={r.url}
-      target="_blank"
-      rel="noreferrer noopener"
-      className="card group flex animate-fade-in items-center gap-3 px-3 py-2.5 transition hover:border-accent/40 hover:bg-bg-card"
-    >
-      {favicon ? (
-        <img
-          src={favicon}
-          alt=""
-          width={24}
-          height={24}
-          loading="lazy"
-          className="h-6 w-6 flex-none rounded bg-zinc-800"
-          onError={(e) => ((e.currentTarget.style.visibility = 'hidden'))}
-        />
-      ) : (
-        <div className="h-6 w-6 flex-none rounded bg-zinc-800" />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <p className="truncate text-sm font-medium text-zinc-100">{r.site}</p>
-          <span className={`chip border ${meta.className} !py-0`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-            {meta.label}
-          </span>
-          {typeof r.confidence === 'number' && r.status !== 'skipped' && (
-            <ConfidenceBadge value={r.confidence} status={r.status} />
-          )}
-          {r.verified === true && (
-            <span
-              className="chip border border-ok/40 bg-ok/10 !py-0 text-[10px] text-ok"
-              title="Confirmed by a second probe with a rotated UA + referer."
-            >
-              ✓ verified
+    <div className="card group animate-fade-in transition hover:border-accent/40 hover:bg-bg-card">
+      <a
+        href={r.url}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="flex items-center gap-3 px-3 py-2.5"
+      >
+        {favicon ? (
+          <img
+            src={favicon}
+            alt=""
+            width={24}
+            height={24}
+            loading="lazy"
+            className="h-6 w-6 flex-none rounded bg-zinc-800"
+            onError={(e) => ((e.currentTarget.style.visibility = 'hidden'))}
+          />
+        ) : (
+          <div className="h-6 w-6 flex-none rounded bg-zinc-800" />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="truncate text-sm font-medium text-zinc-100">{r.site}</p>
+            <span className={`chip border ${meta.className} !py-0`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+              {meta.label}
             </span>
-          )}
-          {r.verified === false && (
-            <span
-              className="chip border border-warn/40 bg-warn/10 !py-0 text-[10px] text-warn"
-              title="Second probe disagreed; primary classification demoted."
-            >
-              ! conflict
-            </span>
-          )}
+            {typeof r.confidence === 'number' && r.status !== 'skipped' && (
+              <ConfidenceBadge value={r.confidence} status={r.status} />
+            )}
+            {r.verified === true && (
+              <span
+                className="chip border border-ok/40 bg-ok/10 !py-0 text-[10px] text-ok"
+                title="Confirmed by a second probe with a rotated UA + referer."
+              >
+                ✓ verified
+              </span>
+            )}
+            {r.verified === false && (
+              <span
+                className="chip border border-warn/40 bg-warn/10 !py-0 text-[10px] text-warn"
+                title="Second probe disagreed; primary classification demoted."
+              >
+                ! conflict
+              </span>
+            )}
+            {hasExtracted && (
+              <button
+                type="button"
+                className="chip border border-accent/40 bg-accent/10 !py-0 text-[10px] text-accent hover:bg-accent/20"
+                title={`Phase 3 extracted ${extractedEntries.length} identifier(s) from this page.`}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setShowExtracted((v) => !v)
+                }}
+              >
+                ↗ extracted · {extractedEntries.length}
+              </button>
+            )}
+          </div>
+          <p className="truncate text-xs text-zinc-500">
+            {host}
+            {r.http_status && <span className="ml-2 font-mono">[{r.http_status}]</span>}
+            {r.elapsed_ms != null && <span className="ml-2">{r.elapsed_ms}ms</span>}
+            {r.attempts != null && r.attempts > 1 && (
+              <span className="ml-2 font-mono text-warn">retry×{r.attempts - 1}</span>
+            )}
+            {r.discovered_via && (
+              <span
+                className="ml-2 font-mono text-emerald-400"
+                title="Discovered via Phase 3 graph recursion."
+              >
+                via {r.discovered_via}
+              </span>
+            )}
+          </p>
         </div>
-        <p className="truncate text-xs text-zinc-500">
-          {host}
-          {r.http_status && <span className="ml-2 font-mono">[{r.http_status}]</span>}
-          {r.elapsed_ms != null && <span className="ml-2">{r.elapsed_ms}ms</span>}
-          {r.attempts != null && r.attempts > 1 && (
-            <span className="ml-2 font-mono text-warn">retry×{r.attempts - 1}</span>
-          )}
-        </p>
-      </div>
-      <ExternalIcon className="hidden h-4 w-4 text-zinc-500 transition group-hover:text-accent sm:block" />
-    </a>
+        <ExternalIcon className="hidden h-4 w-4 text-zinc-500 transition group-hover:text-accent sm:block" />
+      </a>
+      {hasExtracted && showExtracted && (
+        <div className="border-t border-bg-border bg-bg-card/50 px-3 py-2 text-xs">
+          {extractedEntries.map(([k, v]) => (
+            <div key={k} className="flex gap-2 py-0.5">
+              <span className="w-24 flex-none truncate font-mono text-zinc-500">{k}</span>
+              <span className="min-w-0 flex-1 break-all text-zinc-200">{v}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
