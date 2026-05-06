@@ -23,6 +23,7 @@ from . import __version__
 from . import admin_settings as admin_settings_mod
 from . import auth as auth_mod
 from . import history as history_mod
+from . import permutations as permutations_mod
 from . import site_overrides as overrides_mod
 from .auth import (
     SESSION_COOKIE,
@@ -604,6 +605,179 @@ async def search_graph(
             "Connection": "keep-alive",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5c: username permutation search.
+# ---------------------------------------------------------------------------
+
+
+class PermuteSearchRequest(SearchRequest):
+    """Run the catalog scan against the base handle and a deterministic
+    set of common variants (separators / suffixes / prefixes / leetspeak).
+
+    The base ``username`` is always probed first; the remaining
+    candidates come from ``permutations.generate_permutations`` and are
+    scanned sequentially over the same httpx client to amortise the
+    connection pool across permutations.
+    """
+
+    max_permutations: int = Field(default=10, ge=0, le=40)
+    strategies: list[str] | None = Field(default=None)
+
+    @field_validator("strategies")
+    @classmethod
+    def _val_strategies(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        unknown = [s for s in v if s not in permutations_mod.STRATEGY_KEYS]
+        if unknown:
+            raise ValueError(
+                f"unknown permutation strategy: {unknown[0]} "
+                f"(allowed: {sorted(permutations_mod.STRATEGY_KEYS)})"
+            )
+        # Drop duplicates while preserving order.
+        seen: set[str] = set()
+        out: list[str] = []
+        for s in v:
+            if s in seen:
+                continue
+            out.append(s)
+            seen.add(s)
+        return out
+
+
+async def _permute_search_stream(
+    req: PermuteSearchRequest,
+    catalog: SiteCatalog,
+    *,
+    member: Member | None = None,
+) -> AsyncIterator[bytes]:
+    sites = catalog.filtered(tags=req.tags, limit=req.limit)
+
+    candidates: list[str] = []
+    if req.max_permutations > 0:
+        try:
+            candidates = permutations_mod.generate_permutations(
+                req.username,
+                max_count=req.max_permutations,
+                strategies=req.strategies,
+            )
+        except permutations_mod.UnknownStrategyError as e:
+            yield _sse_event("error", {"detail": f"unknown strategy: {e}"})
+            return
+
+    handles: list[str] = [req.username, *candidates]
+
+    yield _sse_event(
+        "start",
+        {
+            "username": req.username,
+            "total": len(sites),
+            "candidates": candidates,
+            "candidate_count": len(handles),
+            "strategies": (
+                req.strategies
+                if req.strategies is not None
+                else list(permutations_mod.DEFAULT_STRATEGY_ORDER)
+            ),
+        },
+    )
+
+    if not sites:
+        yield _sse_event("done", {"results": 0, "candidates_run": 0})
+        return
+
+    started_at = history_mod.now_unix()
+    collected: list[dict[str, Any]] = []
+    candidates_run = 0
+    async with httpx.AsyncClient(
+        timeout=settings.request_timeout,
+        http2=True,
+        limits=httpx.Limits(
+            max_connections=settings.total_concurrency,
+            max_keepalive_connections=settings.total_concurrency,
+        ),
+        follow_redirects=True,
+    ) as client:
+        for index, handle in enumerate(handles):
+            yield _sse_event(
+                "candidate_start",
+                {
+                    "username": handle,
+                    "index": index,
+                    "total": len(handles),
+                    "is_base": handle == req.username,
+                },
+            )
+            claimed_for_handle = 0
+            async for result in stream_checks(sites, handle, client=client):
+                payload = result.to_dict()
+                payload["permutation_username"] = handle
+                payload["parent_username"] = req.username
+                if result.status == "claimed":
+                    claimed_for_handle += 1
+                collected.append(payload)
+                yield _sse_event("result", payload)
+            yield _sse_event(
+                "candidate_done",
+                {
+                    "username": handle,
+                    "index": index,
+                    "claimed": claimed_for_handle,
+                    "total": len(sites),
+                },
+            )
+            candidates_run += 1
+
+    scan_id: int | None = None
+    if member is not None:
+        scan_id = history_mod.record_scan(
+            member=member.username,
+            username=req.username,
+            mode="permute",
+            started_at=started_at,
+            finished_at=history_mod.now_unix(),
+            site_count=len(sites),
+            results=collected,
+        )
+    yield _sse_event(
+        "done",
+        {
+            "results": len(collected),
+            "candidates_run": candidates_run,
+            "scan_id": scan_id,
+        },
+    )
+
+
+@app.post("/api/search/permute")
+@limiter.limit(settings.search_rate_limit)
+async def search_permute(
+    request: Request,
+    body: PermuteSearchRequest,
+    catalog: SiteCatalog = Depends(get_catalog),
+    member: Member = Depends(current_member),
+) -> StreamingResponse:
+    if not catalog.sites:
+        raise HTTPException(503, "site catalog unavailable")
+    return StreamingResponse(
+        _permute_search_stream(body, catalog, member=member),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@app.get("/api/permute/strategies")
+async def permute_strategies(
+    _: Member = Depends(current_member),
+) -> dict[str, Any]:
+    """Static descriptor list for the SPA's permutation strategy selector."""
+    return {"strategies": permutations_mod.describe_strategies()}
 
 
 # ---------------------------------------------------------------------------

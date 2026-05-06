@@ -25,7 +25,7 @@ from typing import Any, Literal
 from .auth import db_connection
 from .config import settings
 
-ScanMode = Literal["list", "graph"]
+ScanMode = Literal["list", "graph", "permute"]
 
 # How many keys we serialise per result. Keep this stable — adding new
 # entries breaks the diff algorithm against historical scans.

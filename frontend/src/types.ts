@@ -28,6 +28,10 @@ export interface CheckResult {
   // primary-side username to make the recursion edge easy to render.
   parent_username?: string | null
   discovered_via?: string
+  // Phase 5c: when set, the result was produced by a permutation scan
+  // (one of the variants generated for the base handle). For base
+  // results from list/graph searches, this field is absent.
+  permutation_username?: string
   // Phase 4: complementary 0-100 probability from the bundled ONNX
   // classifier. ``null``/missing = ML scoring wasn't run (model
   // unavailable, feature disabled, or a SKIPPED probe).

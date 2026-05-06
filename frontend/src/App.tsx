@@ -8,7 +8,7 @@ import { GraphView } from './components/GraphView'
 import { Disclaimer } from './components/Disclaimer'
 import { LoginPage } from './components/LoginPage'
 import { AdminPanel } from './components/AdminPanel'
-import { fetchSites, streamGraphSearch, streamSearch } from './api'
+import { fetchSites, streamGraphSearch, streamPermuteSearch, streamSearch } from './api'
 import { useAuth } from './auth-context'
 import type {
   CheckResult,
@@ -21,7 +21,23 @@ import type {
 
 type StatusFilter = 'all' | 'claimed' | 'free' | 'unknown' | 'blocked' | 'error'
 type View = 'search' | 'admin'
-type Mode = 'list' | 'graph'
+type Mode = 'list' | 'graph' | 'permute'
+
+interface PermuteState {
+  base: string
+  candidates: string[]
+  current: string | null
+  perCandidate: Record<string, { claimed: number; total: number; done: boolean }>
+  filter: 'all' | string
+}
+
+const INITIAL_PERMUTE: PermuteState = {
+  base: '',
+  candidates: [],
+  current: null,
+  perCandidate: {},
+  filter: 'all',
+}
 
 const INITIAL_GRAPH: GraphProgress = {
   username: '',
@@ -73,6 +89,7 @@ function SearchView() {
     state: 'idle',
   })
   const [graphProgress, setGraphProgress] = useState<GraphProgress>(INITIAL_GRAPH)
+  const [permuteProgress, setPermuteProgress] = useState<PermuteState>(INITIAL_PERMUTE)
   const [username, setUsername] = useState<string>('')
   const abortRef = useRef<AbortController | null>(null)
 
@@ -87,6 +104,68 @@ function SearchView() {
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setUsername(name)
+
+    if (mode === 'permute') {
+      setPermuteProgress({ ...INITIAL_PERMUTE, base: name })
+      setProgress({ total: 0, done: 0, results: [], state: 'running' })
+      streamPermuteSearch(
+        { username: name, tags, limit: 250, max_permutations: 10 },
+        {
+          signal: ctrl.signal,
+          onCandidates: ({ candidates }) =>
+            setPermuteProgress((p) => ({
+              ...p,
+              candidates,
+              perCandidate: Object.fromEntries(
+                [name, ...candidates].map((u) => [
+                  u,
+                  { claimed: 0, total: 0, done: false },
+                ]),
+              ),
+            })),
+          onStart: ({ total }) => setProgress((p) => ({ ...p, total, state: 'running' })),
+          onCandidateStart: ({ username: candidate }) =>
+            setPermuteProgress((p) => ({ ...p, current: candidate })),
+          onResult: (r) => {
+            setProgress((p) => ({
+              ...p,
+              done: p.done + 1,
+              results: [...p.results, r],
+            }))
+            if (r.permutation_username && r.status === 'claimed') {
+              setPermuteProgress((p) => {
+                const stat = p.perCandidate[r.permutation_username!] ?? {
+                  claimed: 0,
+                  total: 0,
+                  done: false,
+                }
+                return {
+                  ...p,
+                  perCandidate: {
+                    ...p.perCandidate,
+                    [r.permutation_username!]: { ...stat, claimed: stat.claimed + 1 },
+                  },
+                }
+              })
+            }
+          },
+          onCandidateDone: ({ username: candidate, claimed, total }) =>
+            setPermuteProgress((p) => ({
+              ...p,
+              perCandidate: {
+                ...p.perCandidate,
+                [candidate]: { claimed, total, done: true },
+              },
+            })),
+          onDone: () => {
+            setProgress((p) => ({ ...p, state: 'done' }))
+            setPermuteProgress((p) => ({ ...p, current: null }))
+          },
+          onError: (msg) => setProgress((p) => ({ ...p, state: 'error', error: msg })),
+        },
+      )
+      return
+    }
 
     if (mode === 'graph') {
       setGraphProgress({ ...INITIAL_GRAPH, username: name, state: 'running' })
@@ -183,9 +262,18 @@ function SearchView() {
   }, [progress.results])
 
   const visibleResults = useMemo(() => {
-    if (statusFilter === 'all') return sortedResults
-    return sortedResults.filter((r) => r.status === statusFilter)
-  }, [sortedResults, statusFilter])
+    let out = sortedResults
+    if (mode === 'permute' && permuteProgress.filter !== 'all') {
+      out = out.filter((r) => {
+        const handle = r.permutation_username ?? permuteProgress.base
+        return handle === permuteProgress.filter
+      })
+    }
+    if (statusFilter !== 'all') {
+      out = out.filter((r) => r.status === statusFilter)
+    }
+    return out
+  }, [sortedResults, statusFilter, mode, permuteProgress.filter, permuteProgress.base])
 
   const isRunning = progress.state === 'running'
 
@@ -227,7 +315,7 @@ function SearchView() {
 
       <section className="mx-auto mt-3 flex max-w-3xl items-center gap-1.5">
         <span className="mr-1 text-xs uppercase tracking-wider text-zinc-500">view</span>
-        {(['list', 'graph'] as Mode[]).map((m) => (
+        {(['list', 'graph', 'permute'] as Mode[]).map((m) => (
           <button
             key={m}
             type="button"
@@ -239,7 +327,13 @@ function SearchView() {
                 : 'hover:!text-white disabled:opacity-50')
             }
             onClick={() => setMode(m)}
-            title={m === 'graph' ? 'recursive identity-graph view (Phase 3)' : undefined}
+            title={
+              m === 'graph'
+                ? 'recursive identity-graph view (Phase 3)'
+                : m === 'permute'
+                  ? 'fan-out scan over common variants of the base handle (Phase 5c)'
+                  : undefined
+            }
           >
             {m}
           </button>
@@ -247,6 +341,11 @@ function SearchView() {
         {mode === 'graph' && (
           <span className="ml-2 text-[10px] text-zinc-500">
             depth-1 recursion · scans up to {5} secondary usernames
+          </span>
+        )}
+        {mode === 'permute' && (
+          <span className="ml-2 text-[10px] text-zinc-500">
+            base + up to 10 variants (separators · suffixes · prefixes · leetspeak)
           </span>
         )}
       </section>
@@ -265,6 +364,50 @@ function SearchView() {
             <GraphView progress={graphProgress} />
           ) : (
             <>
+              {mode === 'permute' && permuteProgress.candidates.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="mr-1 text-xs uppercase tracking-wider text-zinc-500">
+                    handle
+                  </span>
+                  <button
+                    type="button"
+                    className={
+                      'chip transition ' +
+                      (permuteProgress.filter === 'all'
+                        ? '!border-accent !bg-accent/15 !text-white'
+                        : 'hover:!text-white')
+                    }
+                    onClick={() => setPermuteProgress((p) => ({ ...p, filter: 'all' }))}
+                  >
+                    all
+                  </button>
+                  {[permuteProgress.base, ...permuteProgress.candidates].map((u) => {
+                    const stat = permuteProgress.perCandidate[u]
+                    const claimed = stat?.claimed ?? 0
+                    const isCurrent = permuteProgress.current === u
+                    return (
+                      <button
+                        key={u}
+                        type="button"
+                        className={
+                          'chip transition ' +
+                          (permuteProgress.filter === u
+                            ? '!border-accent !bg-accent/15 !text-white'
+                            : isCurrent
+                              ? 'hover:!text-white !border-accent/60'
+                              : 'hover:!text-white')
+                        }
+                        onClick={() => setPermuteProgress((p) => ({ ...p, filter: u }))}
+                      >
+                        {u}
+                        {claimed > 0 && (
+                          <span className="ml-1 text-[10px] text-good">+{claimed}</span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="mr-1 text-xs uppercase tracking-wider text-zinc-500">show</span>
                 {(['all', 'claimed', 'unknown', 'blocked', 'free', 'error'] as StatusFilter[]).map(
@@ -287,8 +430,11 @@ function SearchView() {
               </div>
 
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {visibleResults.map((r) => (
-                  <ResultCard key={r.site} r={r} />
+                {visibleResults.map((r, i) => (
+                  <ResultCard
+                    key={`${r.site}-${r.permutation_username ?? r.parent_username ?? 'base'}-${i}`}
+                    r={r}
+                  />
                 ))}
               </div>
 

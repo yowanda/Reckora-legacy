@@ -140,7 +140,7 @@ def init_db() -> None:
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 member       TEXT NOT NULL COLLATE NOCASE,
                 username     TEXT NOT NULL,
-                mode         TEXT NOT NULL CHECK(mode IN ('list','graph')),
+                mode         TEXT NOT NULL CHECK(mode IN ('list','graph','permute')),
                 started_at   INTEGER NOT NULL,
                 finished_at  INTEGER NOT NULL,
                 site_count   INTEGER NOT NULL,
@@ -168,6 +168,44 @@ def init_db() -> None:
             );
             """
         )
+        # Phase 5c: migrate ``scans`` if its CHECK constraint pre-dates the
+        # ``permute`` mode. SQLite can't ALTER a CHECK in place; we copy
+        # rows into a new table and atomic-rename within a transaction.
+        existing_scans_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='scans'"
+        ).fetchone()
+        if existing_scans_sql is not None and "permute" not in (existing_scans_sql["sql"] or ""):
+            conn.executescript(
+                """
+                BEGIN;
+                CREATE TABLE scans_v2 (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    member       TEXT NOT NULL COLLATE NOCASE,
+                    username     TEXT NOT NULL,
+                    mode         TEXT NOT NULL
+                                  CHECK(mode IN ('list','graph','permute')),
+                    started_at   INTEGER NOT NULL,
+                    finished_at  INTEGER NOT NULL,
+                    site_count   INTEGER NOT NULL,
+                    claimed      INTEGER NOT NULL,
+                    free         INTEGER NOT NULL,
+                    blocked      INTEGER NOT NULL,
+                    unknown      INTEGER NOT NULL,
+                    error_count  INTEGER NOT NULL,
+                    results_json TEXT NOT NULL
+                );
+                INSERT INTO scans_v2
+                    SELECT id, member, username, mode, started_at, finished_at,
+                           site_count, claimed, free, blocked, unknown,
+                           error_count, results_json
+                    FROM scans;
+                DROP TABLE scans;
+                ALTER TABLE scans_v2 RENAME TO scans;
+                CREATE INDEX IF NOT EXISTS idx_scans_member_username
+                    ON scans(member, username, finished_at DESC);
+                COMMIT;
+                """
+            )
 
 
 def _ensure_session_secret() -> bytes:

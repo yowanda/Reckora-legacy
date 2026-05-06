@@ -319,6 +319,146 @@ export interface GraphSearchEvents extends SearchEvents {
   }) => void
 }
 
+// ---------------------------------------------------------------------------
+// Phase 5c: permutation search (run the catalog scan against the base
+// + a deterministic set of common variants).
+// ---------------------------------------------------------------------------
+
+export interface PermuteSearchEvents extends SearchEvents {
+  onCandidates?: (info: {
+    base: string
+    candidates: string[]
+    candidate_count: number
+    strategies: string[]
+  }) => void
+  onCandidateStart?: (info: {
+    username: string
+    index: number
+    total: number
+    is_base: boolean
+  }) => void
+  onCandidateDone?: (info: {
+    username: string
+    index: number
+    claimed: number
+    total: number
+  }) => void
+  onResult?: (r: CheckResult & { permutation_username?: string }) => void
+  onDone?: (info: { results: number; candidates_run?: number; scan_id?: number | null }) => void
+}
+
+export interface PermuteStrategy {
+  key: string
+  title: string
+  description: string
+}
+
+export async function fetchPermuteStrategies(): Promise<PermuteStrategy[]> {
+  const body = await jsonFetch<{ strategies: PermuteStrategy[] }>('/api/permute/strategies')
+  return body.strategies
+}
+
+export async function streamPermuteSearch(
+  payload: {
+    username: string
+    tags: string[]
+    limit: number
+    max_permutations: number
+    strategies?: string[] | null
+  },
+  events: PermuteSearchEvents,
+): Promise<void> {
+  const r = await fetch(`${API_BASE}/api/search/permute`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify(payload),
+    signal: events.signal,
+  })
+
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    let detail = `HTTP ${r.status}`
+    try {
+      const j = JSON.parse(text)
+      if (j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+    } catch {
+      if (text) detail = text
+    }
+    events.onError?.(detail)
+    return
+  }
+
+  if (!r.body) {
+    events.onError?.('streaming not supported')
+    return
+  }
+
+  const reader = r.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let idx
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const chunk = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      handlePermuteSseChunk(chunk, events)
+    }
+  }
+  if (buffer.trim()) handlePermuteSseChunk(buffer, events)
+}
+
+function handlePermuteSseChunk(chunk: string, events: PermuteSearchEvents): void {
+  let event = 'message'
+  const dataLines: string[] = []
+  for (const raw of chunk.split('\n')) {
+    if (raw.startsWith('event:')) event = raw.slice(6).trim()
+    else if (raw.startsWith('data:')) dataLines.push(raw.slice(5).trim())
+  }
+  if (!dataLines.length) return
+  let data: unknown
+  try {
+    data = JSON.parse(dataLines.join('\n'))
+  } catch {
+    return
+  }
+  switch (event) {
+    case 'start':
+      events.onCandidates?.(
+        data as {
+          base: string
+          candidates: string[]
+          candidate_count: number
+          strategies: string[]
+        },
+      )
+      events.onStart?.(data as { username: string; total: number })
+      break
+    case 'candidate_start':
+      events.onCandidateStart?.(
+        data as { username: string; index: number; total: number; is_base: boolean },
+      )
+      break
+    case 'result':
+      events.onResult?.(data as CheckResult & { permutation_username?: string })
+      break
+    case 'candidate_done':
+      events.onCandidateDone?.(
+        data as { username: string; index: number; claimed: number; total: number },
+      )
+      break
+    case 'done':
+      events.onDone?.(data as { results: number; candidates_run?: number; scan_id?: number | null })
+      break
+    case 'error':
+      events.onError?.(String((data as { detail?: string }).detail ?? data))
+      break
+  }
+}
+
 export async function streamGraphSearch(
   payload: {
     username: string
