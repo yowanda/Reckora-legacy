@@ -39,20 +39,28 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 2 — anti-bot & verify | shipped (bd7b768) | 2,506 | 0–100 | yes | yes (Firefox UA + rotated referrer) | yes (~928 sites) | yes (curl-cffi chrome131) | — | — |
 | 3 — extraction & graph | shipped | 2,506 | 0–100 | yes | yes | yes | yes | **yes (socid_extractor + react-flow)** | — |
 | 4 — beyond maigret | shipped | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes | **yes (ONNX) + admin live DB editor + scan-history diff** |
-| 5 — operator polish | shipped 6/6 (5f, 5d, 5c, 5e, 5b, 5a) | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes (depth admin-tunable) | yes |
+| 5 — operator polish | shipped 7/8 (5f, 5d, 5c, 5e, 5b, 5a, **5g**) + **5h in flight** | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes (depth admin-tunable) | yes |
 | 6 — accuracy & gap closure vs maigret | planned ([ROADMAP](./ROADMAP.md)) | 3,000+ (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
 | 7 — intel & enrichment | planned ([ROADMAP](./ROADMAP.md)) | 3,000+ | 0–100 + ML retrained | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image |
 | 8 — scale & infra | planned ([ROADMAP](./ROADMAP.md)) | 3,000+ | 0–100 + ML | yes (distributed worker fleet) | yes | yes | yes (rotating proxy) | yes | yes |
 
-> Phase 6-8 are scoped in [ROADMAP.md](./ROADMAP.md). They close the remaining
-> coverage gap with `soxoj/maigret` (Phase 6) then push beyond it on
-> intel/enrichment (Phase 7) and operator-scale infra (Phase 8).
+> [`ROADMAP.md`](./ROADMAP.md) is the **single source of truth** for what's
+> in flight + planned. The "Live status" header at the top of the roadmap is
+> updated at the end of every batch (current `main` SHA, current HF Space
+> SHA, active batch, last batch shipped, test baseline). The master checklist
+> ticks off each sub-phase as it lands. Phase 5h is currently in flight —
+> it tightens the precision floor on the existing 2,506-site catalog so the
+> SPA's claimed bucket only contains hits the operator can click and
+> immediately see a real profile (no soft-404s, no dead links). Phase 6 closes
+> the remaining coverage gap with `soxoj/maigret`, Phase 7 pushes beyond it
+> on intel/enrichment, Phase 8 makes the platform horizontally scalable.
 
-### Phase 5 — operator polish (6/6 sub-phases shipped)
+### Phase 5 — operator polish (7/8 sub-phases shipped, 5h in flight)
 
-Phase 5 is split into six focused commits, each landing direct-to-main with
+Phase 5 lands as a stream of focused commits, each landing direct-to-main with
 its own CI green + auto-deploy to the HF Space. The sub-phase letters reflect
-implementation order, not feature priority.
+implementation order, not feature priority. The current state of every
+sub-phase + planned Phase 6-8 work is tracked in [`ROADMAP.md`](./ROADMAP.md).
 
 | Sub-phase | Commit | One-liner |
 | --- | --- | --- |
@@ -62,8 +70,10 @@ implementation order, not feature priority.
 | 5e — outbound proxy / Tor | [`81ed51a`](https://github.com/yowanda/Reckora/commit/81ed51a) + [`4d2c470`](https://github.com/yowanda/Reckora/commit/4d2c470) | New `app/proxy.py` gate (`RECKORA_PROXY_URL` env + `proxy_enabled` admin knob) — supports `socks5://`, `socks5h://`, `http://`, `https://`; centralised httpx client construction so list/graph/permute streams + curl-cffi rescue all pick up proxy uniformly; `GET /api/health` and `GET /api/settings` expose `{configured, enabled, active, scheme}` descriptor (URL itself never leaks); Header pill "via tor" / "via http proxy" |
 | 5b — scan export | [`17b50c2`](https://github.com/yowanda/Reckora/commit/17b50c2) | New `app/exports.py` (CSV / JSON / Markdown / HTML formatters, pure stdlib); new `GET /api/history/<id>/export.<fmt>` route (auth + ownership + format whitelist + `Cache-Control: private, no-store`); ScanModal export buttons + browser-side download via object URL + `Content-Disposition` filename. PDF intentionally deferred — HTML export prints to clean A4 PDF via browser File→Print, and adding `reportlab`/`weasyprint` would pull in a multi-MB native dep stack |
 | 5a — identity types | [`6e7b64b`](https://github.com/yowanda/Reckora/commit/6e7b64b) + [`93681f8`](https://github.com/yowanda/Reckora/commit/93681f8) | New `app/identity.py` with per-type validators (`username` / `email` / `phone` / `gaia` / `yandex` / `skype`), normalisers, and a curated `KNOWN_IDENTITY_OVERRIDES` map (Gravatar→email, Blogger-by-GAIA→gaia, Yandex* → yandex). `sites.json` schema gains optional `identityTypes` per site (default `["username"]` keeps the catalog backwards-compatible). `SiteCatalog.filtered()` and `check_site()` accept an `identity_type` kwarg; non-username scans bypass username-shaped `regex_check` and skip the username-trained ML reranker. Per-site transforms applied before URL substitution (Gravatar email → MD5 hex via `IDENTITY_TRANSFORMS`). `SearchRequest` validates the identifier against the active type and normalises (email→lower, phone→digits+plus, yandex→lower). Graph + permute SSE routes reject non-username identity types at the validator layer (their extraction / permutation logic is username-specific). Frontend ships an identity-type picker dropdown next to the search input, with dynamic placeholder + per-type regex client-side validation; the picker auto-locks to `username` when graph/permute mode is selected. Companion commit `93681f8` pins the pre-commit ruff hook to `v0.15.12` so local hooks and CI's `ruff format --check` agree |
+| **5g — scan-depth picker** | [`61d7716`](https://github.com/yowanda/Reckora/commit/61d7716) | Backend `SearchRequest.limit` cap raised from `le=600` to `le=3000` so a single request can probe the entire 2,506-site catalog (with headroom for Phase 6a's regen). Frontend `types.ts` introduces `SCAN_DEPTH_PRESETS = [100, 250, 500, 1000, 'all']` + `resolveScanDepth(depth, catalogCount)` which maps `'all'` to the live catalog count clamped to the backend hard cap. `SearchBar.tsx` exposes a `Scan depth` `<select>` next to the existing identity-type picker, labelled with estimated wall-clock per preset (e.g. `All sites (~2,506) (~330s)`). `App.tsx` forwards the picker value through all three SSE stream call sites (list / graph / permute). Default stays at `250` so casual single-username lookups still take ~30 s; `All sites` is opt-in for thorough sweeps. |
+| **5h — claimed precision floor** *(in flight — see [ROADMAP](./ROADMAP.md))* | — | Multi-layer post-claim demotion so the SPA's claimed bucket only contains hits the operator can click and immediately see a real profile. Layer A: `min_claimed_confidence` admin knob (default 60); Layer B: `min_claimed_ml_confidence` (default 50); Layer C: `require_verify_for_claim` (default 0); Layer D: post-claim link-liveness probe on the human-facing display URL (404/410, redirect-to-homepage, redirect-to-login, soft-404 → demote to `UNKNOWN`); Layer E: dual-URL check when `urlProbe ≠ url`. Each demoted row keeps its evidence (signals, ml_confidence) so it can still be inspected — it's just not in the claimed bucket. |
 
-**Phase 5 test growth:** 115 → **207 pytest cases** (+92 across 5d/5c/5e/5b/5a), 0 mypy errors across 17 source files, 3 Playwright e2e cases. Frontend bundle 434.79 KB / 133.96 KB gzip after all six sub-phases (identity-type picker + meta table adds ~1.5 KB).
+**Phase 5 test growth:** 115 → **207 pytest cases** at end-of-5g (+92 across 5d/5c/5e/5b/5a; 5g introduces no new cases since it's pure SPA wiring + a Pydantic field bound). 0 mypy errors across 17 source files, 3 Playwright e2e cases. Frontend bundle 435.91 KB / 134.37 KB gzip after 5g (+1.12 KB gzip from the picker). Phase 5h will grow the test count by ~+10 cases (one per new demote signal + admin-knob round-trip) — see [ROADMAP](./ROADMAP.md) for current progress.
 
 **Phase 1 benchmark — 100-site synthetic scan, no caching, prod HF Space.**
 
