@@ -7,7 +7,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
@@ -22,6 +22,7 @@ from slowapi.util import get_remote_address
 from . import __version__
 from . import admin_settings as admin_settings_mod
 from . import auth as auth_mod
+from . import exports as exports_mod
 from . import history as history_mod
 from . import permutations as permutations_mod
 from . import proxy as proxy_mod
@@ -1034,6 +1035,46 @@ async def history_get(
         raise HTTPException(404, "scan not found")
     summary, results = out
     return {"scan": summary.to_dict(), "results": results}
+
+
+@app.get("/api/history/{scan_id}/export.{fmt}")
+async def history_export(
+    scan_id: int,
+    fmt: str,
+    member: Member = Depends(current_member),
+) -> Response:
+    """Phase 5b: download a single scan as csv / json / markdown / html.
+
+    Auth and ownership checks mirror ``GET /api/history/<id>``; the
+    payload is rendered server-side and shipped with a
+    ``Content-Disposition: attachment`` so the browser writes it
+    straight to disk.
+    """
+    if not settings.enable_scan_history:
+        raise HTTPException(404, "scan history disabled")
+    fmt_lower = fmt.lower()
+    if fmt_lower not in exports_mod.ALLOWED_FORMATS:
+        raise HTTPException(
+            400,
+            f"unsupported export format: {fmt!r} (allowed: {sorted(exports_mod.ALLOWED_FORMATS)})",
+        )
+    out = history_mod.get_scan(scan_id, member.username)
+    if out is None:
+        raise HTTPException(404, "scan not found")
+    summary, results = out
+    body, media_type, filename = exports_mod.render(
+        cast(exports_mod.ExportFormat, fmt_lower),
+        summary,
+        results,
+    )
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={
+            "content-disposition": f'attachment; filename="{filename}"',
+            "cache-control": "private, no-store",
+        },
+    )
 
 
 @app.delete("/api/history/{scan_id}")

@@ -274,6 +274,51 @@ export async function diffHistory(fromId: number, toId: number): Promise<ScanDif
   return jsonFetch<ScanDiff>(`/api/history/diff/${fromId}/${toId}`)
 }
 
+// Phase 5b: history export. The four formats below match
+// ``app.exports.ALLOWED_FORMATS`` server-side. ``downloadHistoryExport``
+// fetches the response body, drops it into an object URL, and clicks
+// a synthetic anchor — the same trick FF/Chrome use to honour the
+// ``Content-Disposition`` filename without needing to navigate.
+// ---------------------------------------------------------------------------
+
+export type ExportFormat = 'csv' | 'json' | 'markdown' | 'html'
+
+export async function downloadHistoryExport(
+  scanId: number,
+  fmt: ExportFormat,
+): Promise<void> {
+  const r = await fetch(`${API_BASE}/api/history/${scanId}/export.${fmt}`, {
+    credentials: 'include',
+  })
+  if (!r.ok) {
+    let detail: string
+    try {
+      const body = (await r.json()) as { detail?: string }
+      detail = body?.detail ?? r.statusText
+    } catch {
+      detail = r.statusText
+    }
+    throw new ApiError(r.status, detail)
+  }
+  const blob = await r.blob()
+  // Pull the filename out of Content-Disposition; fall back to a sane
+  // default if the header is missing (e.g. a future response without it).
+  const cd = r.headers.get('content-disposition') ?? ''
+  const match = /filename="?([^";]+)"?/i.exec(cd)
+  const filename = match ? match[1] : `reckora-${scanId}.${fmt === 'markdown' ? 'md' : fmt}`
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // Defer revoke so Firefox finishes the download before the URL goes
+  // away. 1 sec is generous; the browser only needs the URL for the
+  // initial click handoff.
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 function handleSseChunk(chunk: string, events: SearchEvents | GraphSearchEvents) {
   let event = 'message'
   const dataLines: string[] = []

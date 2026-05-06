@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { deleteHistoryScan, diffHistory, getHistoryScan, listHistory } from '../api'
+import {
+  deleteHistoryScan,
+  diffHistory,
+  downloadHistoryExport,
+  getHistoryScan,
+  listHistory,
+  type ExportFormat,
+} from '../api'
 import {
   ApiError,
   type ScanDetail,
@@ -7,6 +14,17 @@ import {
   type ScanSummary,
   type Status,
 } from '../types'
+
+// Phase 5b: visible export formats in the scan modal. Order matters
+// here — the first option ("HTML") is what most operators want
+// (browser-printable). PDF is generated client-side via the browser's
+// print dialog after opening the HTML export.
+const EXPORT_OPTIONS: { fmt: ExportFormat; label: string; hint: string }[] = [
+  { fmt: 'html', label: 'HTML', hint: 'Browser-printable (Save as PDF via Print)' },
+  { fmt: 'csv', label: 'CSV', hint: 'Full results as a spreadsheet' },
+  { fmt: 'json', label: 'JSON', hint: 'Raw payload for programmatic use' },
+  { fmt: 'markdown', label: 'Markdown', hint: 'Compact summary for tickets/changelog' },
+]
 
 /**
  * Phase 4: per-member scan history with side-by-side diff viewer.
@@ -194,6 +212,21 @@ export function HistoryView() {
 }
 
 function ScanModal({ detail, onClose }: { detail: ScanDetail; onClose: () => void }) {
+  const [exporting, setExporting] = useState<ExportFormat | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
+
+  async function onExport(fmt: ExportFormat) {
+    setExporting(fmt)
+    setExportError(null)
+    try {
+      await downloadHistoryExport(detail.scan.id, fmt)
+    } catch (e) {
+      setExportError(humanizeError(e))
+    } finally {
+      setExporting(null)
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4"
@@ -209,6 +242,26 @@ function ScanModal({ detail, onClose }: { detail: ScanDetail; onClose: () => voi
         <p className="text-xs text-zinc-400">
           {new Date(detail.scan.finished_at * 1000).toLocaleString()} · {detail.scan.mode} · {detail.scan.site_count} sites · {detail.scan.claimed} CLAIMED
         </p>
+        <div className="flex flex-wrap items-center gap-2 border-t border-b border-zinc-800 py-2 text-xs">
+          <span className="text-zinc-500">Export:</span>
+          {EXPORT_OPTIONS.map((opt) => (
+            <button
+              key={opt.fmt}
+              type="button"
+              className="btn-ghost text-xs"
+              disabled={exporting !== null}
+              title={opt.hint}
+              onClick={() => void onExport(opt.fmt)}
+            >
+              {exporting === opt.fmt ? '…' : opt.label}
+            </button>
+          ))}
+        </div>
+        {exportError && (
+          <p className="text-xs text-bad" role="alert">
+            {exportError}
+          </p>
+        )}
         <div className="space-y-1 text-xs">
           {detail.results
             .filter((r) => r.status === 'claimed')
