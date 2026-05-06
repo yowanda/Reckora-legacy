@@ -11,12 +11,12 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 
 | Field | Value |
 | --- | --- |
-| Repo HEAD on main | `<pending push>` (Phase 5h-D part 1 — link-liveness scaffold) |
+| Repo HEAD on main | `<pending push>` (Phase 5h-D part 2 — Layer D unit tests + shared _phase_5h fixture) |
 | HF Space HEAD | `d5b2dac` (mirrors `853b7cc`) |
-| Active batch | **Phase 5h Layer D — part 2** (Layer D unit tests; new file `backend/tests/test_link_liveness.py`) |
-| Last batch shipped | Phase 5h-D part 1 — `_link_liveness_probe()` + `enable_link_liveness` knob (no Layer D unit tests yet; existing 217 / 217 pytest still green via legacy disable-fixture) |
-| Last update | 2026-05-06 (Batch 2 part 1 — link-liveness scaffold) |
-| Test baseline | backend pytest **217 / 217** · mypy 17 src files · ruff clean · frontend lint+build green · e2e 3 / 3 (Layer D adds ~7 cases in part 2) |
+| Active batch | **Phase 5h Layer E — dual-URL check** (probe display URL when url_probe differs from url) |
+| Last batch shipped | Phase 5h-D part 2 — 9 Layer D unit tests in `test_link_liveness.py` + shared `_phase_5h.py` fixture module (226 / 226 pytest green) |
+| Last update | 2026-05-06 (Batch 2 part 2 — Layer D unit tests) |
+| Test baseline | backend pytest **226 / 226** · mypy 17 src files · ruff clean · frontend lint+build green · e2e 3 / 3 |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
 HEAD on main` and `Last update` lines are updated at the end of every batch
@@ -40,7 +40,7 @@ once `command git push origin main` returns and CI is green.
 - [x] **5h-A** — confidence floor knob (`min_claimed_confidence=60` default; admin-tunable)
 - [x] **5h-B** — ML-confidence floor knob (`min_claimed_ml_confidence=50` default; admin-tunable)
 - [x] **5h-C** — verify-required gate (`require_verify_for_claim=0` default; opt-in zero-FP mode)
-- [~] **5h-D** — link-liveness probe: HEAD/GET on the human-facing display URL after every CLAIMED hit; demote on `404 / 410`, redirect-to-homepage, redirect-to-login/signup, soft-404
+- [x] **5h-D** — link-liveness probe: HEAD/GET on the human-facing display URL after every CLAIMED hit; demote on `404 / 410`, redirect-to-homepage, redirect-to-login/signup, soft-404
 - [ ] **5h-E** — dual-URL check when `urlProbe ≠ url`: probe URL OK but display URL fails liveness → demote with `display-url-dead`
 - [ ] **5h-FE** — SPA signal badges (`Link verified live` green; `Demoted (link dead)` red) + `Stats` "Filtered (link)" / "Filtered (confidence)" buckets
 - [ ] **5h-deploy** — HF mirror sync + live click-test (scan `github` with `All sites`, click 5 random claimed rows, all must land on real profile)
