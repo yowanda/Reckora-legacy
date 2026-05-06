@@ -193,3 +193,24 @@ def test_logout_clears_cookie(client: TestClient, admin_token: str) -> None:
     assert r.status_code == 200
     # the cookie should be set with an empty value
     assert "reckora_session" in r.headers.get("set-cookie", "")
+
+
+def test_root_response_is_no_cache(client: TestClient) -> None:
+    """HTML / SPA-fallback root must always be revalidated by the browser so a
+    fresh deploy's new hashed asset URLs reach every tab on next reload."""
+    r = client.get("/")
+    assert r.status_code == 200
+    cc = r.headers.get("cache-control", "").lower()
+    assert "no-cache" in cc
+    assert "no-store" in cc
+    assert "must-revalidate" in cc
+
+
+def test_api_responses_are_not_clobbered_by_cache_middleware(client: TestClient) -> None:
+    """The middleware must skip /api/*; otherwise we'd risk shipping
+    `immutable` headers on JSON endpoints that change frequently."""
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    cc = r.headers.get("cache-control", "")
+    assert "immutable" not in cc
+    assert "max-age=31536000" not in cc

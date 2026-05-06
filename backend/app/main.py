@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -50,6 +50,39 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+# Vite content-hashes filenames in /assets/, so we can pin them for a year.
+# HTML must always be revalidated so a fresh deploy's new asset hashes reach
+# every browser tab on the next reload, not after the cache TTL expires.
+_IMMUTABLE_ASSETS = "public, max-age=31536000, immutable"
+_NO_CACHE_HTML = "no-cache, no-store, must-revalidate"
+_FAVICON_CACHE = "public, max-age=3600"
+
+
+@app.middleware("http")
+async def cache_control(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    response = await call_next(request)
+    # Don't clobber headers a route handler already set (e.g. the SSE search
+    # stream pins `Cache-Control: no-cache, no-transform` itself).
+    if "cache-control" in response.headers:
+        return response
+    path = request.url.path
+    # /api/* responses manage their own caching; leave them alone.
+    if path.startswith("/api/"):
+        return response
+    if path.startswith("/assets/"):
+        response.headers["Cache-Control"] = _IMMUTABLE_ASSETS
+    elif path == "/favicon.svg":
+        response.headers["Cache-Control"] = _FAVICON_CACHE
+    else:
+        response.headers["Cache-Control"] = _NO_CACHE_HTML
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
 @app.on_event("startup")
