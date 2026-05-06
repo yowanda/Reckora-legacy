@@ -127,7 +127,13 @@ class SearchRequest(BaseModel):
     # authoritative shape is governed by ``identity_type``.
     username: str = Field(..., min_length=1, max_length=320)
     tags: list[str] = Field(default_factory=list)
-    limit: int = Field(default=200, ge=1, le=600)
+    # Phase 5g: cap raised from 600 → 3,000 so a single request can probe
+    # the entire catalogue (currently 2,506 sites; Phase 6a regen will push
+    # this to ~3,000+). The default stays at 200 so casual users do not
+    # accidentally trigger a multi-minute scan; the SPA exposes a picker
+    # for higher tiers (250 / 500 / 1000 / all-sites) with progress
+    # streamed via SSE.
+    limit: int = Field(default=200, ge=1, le=3000)
     identity_type: IdentityType = Field(default=DEFAULT_IDENTITY_TYPE)
 
     @field_validator("identity_type")

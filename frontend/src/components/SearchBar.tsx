@@ -1,12 +1,16 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import {
+  DEFAULT_SCAN_DEPTH,
   IDENTITY_TYPES,
   IDENTITY_TYPE_META,
+  SCAN_DEPTH_META,
+  SCAN_DEPTH_PRESETS,
   type IdentityType,
+  type ScanDepth,
 } from '../types'
 
 interface Props {
-  onSubmit: (value: string, identity_type: IdentityType) => void
+  onSubmit: (value: string, identity_type: IdentityType, scan_depth: ScanDepth) => void
   isRunning: boolean
   onStop: () => void
   initial?: string
@@ -14,6 +18,9 @@ interface Props {
   // and permute modes are username-only), pass `lockedIdentityType` to
   // hide the picker and pin the input to that type.
   lockedIdentityType?: IdentityType
+  // Phase 5g: live catalog count so the "All sites" preset shows the
+  // accurate number ("All sites (~2,506)").
+  catalogCount?: number
 }
 
 export function SearchBar({
@@ -22,6 +29,7 @@ export function SearchBar({
   onStop,
   initial = '',
   lockedIdentityType,
+  catalogCount,
 }: Props) {
   const [value, setValue] = useState(initial)
   // ``pickedType`` is the user's most recent selection; the active
@@ -30,6 +38,7 @@ export function SearchBar({
   // into local state avoids the React 19 "setState in effect" lint.
   const [pickedType, setPickedType] = useState<IdentityType>('username')
   const identityType: IdentityType = lockedIdentityType ?? pickedType
+  const [scanDepth, setScanDepth] = useState<ScanDepth>(DEFAULT_SCAN_DEPTH)
   const inputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -48,7 +57,7 @@ export function SearchBar({
       return
     }
     setError(null)
-    onSubmit(trimmed, identityType)
+    onSubmit(trimmed, identityType, scanDepth)
   }
 
   return (
@@ -89,6 +98,30 @@ export function SearchBar({
           type="text"
           inputMode={identityType === 'phone' ? 'tel' : 'text'}
         />
+        <select
+          className="input h-12 sm:w-44"
+          value={String(scanDepth)}
+          onChange={(e) => {
+            const raw = e.target.value
+            setScanDepth(raw === 'all' ? 'all' : (Number(raw) as ScanDepth))
+          }}
+          disabled={isRunning}
+          aria-label="Scan depth"
+          title="Pick how many sites to probe — sorted by alexa rank, top-N. ``All sites`` covers the full catalogue."
+        >
+          {SCAN_DEPTH_PRESETS.map((d) => {
+            const m = SCAN_DEPTH_META[String(d)]
+            const allLabel =
+              d === 'all'
+                ? `All sites${catalogCount ? ` (~${catalogCount.toLocaleString()})` : ''}`
+                : m.label
+            return (
+              <option key={String(d)} value={String(d)}>
+                {allLabel} (~{m.estimated_seconds}s)
+              </option>
+            )
+          })}
+        </select>
         {isRunning ? (
           <button type="button" onClick={onStop} className="btn-ghost h-12 px-5">
             Stop
@@ -103,6 +136,12 @@ export function SearchBar({
       {error && <p className="text-sm text-bad">{error}</p>}
       {!error && identityType !== 'username' && !isRunning && (
         <p className="text-xs text-zinc-500">{meta.hint}</p>
+      )}
+      {!error && scanDepth === 'all' && !isRunning && (
+        <p className="text-xs text-zinc-500">
+          Scanning the full catalogue takes several minutes — results stream in
+          live so you can stop anytime.
+        </p>
       )}
     </form>
   )

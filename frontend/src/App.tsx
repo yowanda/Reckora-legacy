@@ -16,9 +16,11 @@ import type {
   GraphExtracted,
   GraphProgress,
   IdentityType,
+  ScanDepth,
   SearchProgress,
   SitesResponse,
 } from './types'
+import { resolveScanDepth } from './types'
 
 type StatusFilter = 'all' | 'claimed' | 'free' | 'unknown' | 'blocked' | 'error'
 type View = 'search' | 'admin'
@@ -100,17 +102,25 @@ function SearchView() {
       .catch(() => setCatalog({ count: 0, tags: [], sites: [] }))
   }, [])
 
-  function startSearch(name: string, identityType: IdentityType = 'username') {
+  function startSearch(
+    name: string,
+    identityType: IdentityType = 'username',
+    scanDepth: ScanDepth = 250,
+  ) {
     abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setUsername(name)
+    // Phase 5g: resolve the picker preset to a concrete integer the
+    // backend will accept. ``'all'`` -> live catalog count, clamped to
+    // the 3,000-site backend hard cap.
+    const limit = resolveScanDepth(scanDepth, catalog?.count)
 
     if (mode === 'permute') {
       setPermuteProgress({ ...INITIAL_PERMUTE, base: name })
       setProgress({ total: 0, done: 0, results: [], state: 'running' })
       streamPermuteSearch(
-        { username: name, tags, limit: 250, max_permutations: 10 },
+        { username: name, tags, limit, max_permutations: 10 },
         {
           signal: ctrl.signal,
           onCandidates: ({ candidates }) =>
@@ -172,7 +182,7 @@ function SearchView() {
       setGraphProgress({ ...INITIAL_GRAPH, username: name, state: 'running' })
       setProgress({ total: 0, done: 0, results: [], state: 'running' })
       streamGraphSearch(
-        { username: name, tags, limit: 250, depth: 1 },
+        { username: name, tags, limit, depth: 1 },
         {
           signal: ctrl.signal,
           onStart: ({ total }) =>
@@ -217,7 +227,7 @@ function SearchView() {
 
     setProgress({ total: 0, done: 0, results: [], state: 'running' })
     streamSearch(
-      { username: name, tags, limit: 250, identity_type: identityType },
+      { username: name, tags, limit, identity_type: identityType },
       {
         signal: ctrl.signal,
         onStart: ({ total }) => setProgress((p) => ({ ...p, total, state: 'running' })),
@@ -304,6 +314,9 @@ function SearchView() {
           // Phase 5a: graph + permute backends reject non-username
           // identity_type values, so lock the picker accordingly.
           lockedIdentityType={mode === 'list' ? undefined : 'username'}
+          // Phase 5g: surface the live catalog count to the picker so
+          // ``All sites`` shows the accurate "(~2,506)" hint.
+          catalogCount={catalog?.count}
         />
         {catalog && (
           <TagFilter

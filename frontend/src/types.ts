@@ -9,6 +9,63 @@ export type Status = 'claimed' | 'free' | 'unknown' | 'blocked' | 'error' | 'ski
 
 export type IdentityType = 'username' | 'email' | 'phone' | 'gaia' | 'yandex' | 'skype'
 
+// ---------------------------------------------------------------------------
+// Phase 5g: scan depth (how many sites a single search probes).
+// Pre-5g the SPA hard-coded ``limit: 250`` for every stream, so users had
+// no way to scan beyond the top 250 alexa-ranked sites — the remaining
+// ~2,256 niche / regional / new sites in the catalogue silently never
+// got probed. The picker below exposes a small set of presets;
+// ``ALL_SITES`` resolves to the catalog count at runtime.
+// ---------------------------------------------------------------------------
+
+export type ScanDepth = 100 | 250 | 500 | 1000 | 'all'
+
+export const SCAN_DEPTH_PRESETS: readonly ScanDepth[] = [
+  100,
+  250,
+  500,
+  1000,
+  'all',
+] as const
+
+// Hard cap mirrored from ``backend/app/main.py``::``SearchRequest.limit``
+// (Phase 5g raised the backend cap from 600 → 3,000). Used as the
+// fallback when the catalog metadata hasn't loaded yet.
+export const SCAN_DEPTH_HARD_CAP = 3000
+
+export const DEFAULT_SCAN_DEPTH: ScanDepth = 250
+
+export interface ScanDepthMeta {
+  key: ScanDepth
+  label: string
+  // Approximate p95 wall-clock from Phase-2 benchmark, scaled linearly.
+  // Used for the "(~Xs)" hint on the picker. Real number depends on the
+  // active proxy + how many sites are BLOCKED.
+  estimated_seconds: number
+}
+
+export const SCAN_DEPTH_META: Record<string, ScanDepthMeta> = {
+  '100': { key: 100, label: 'Top 100', estimated_seconds: 15 },
+  '250': { key: 250, label: 'Top 250', estimated_seconds: 30 },
+  '500': { key: 500, label: 'Top 500', estimated_seconds: 65 },
+  '1000': { key: 1000, label: 'Top 1000', estimated_seconds: 130 },
+  all: { key: 'all', label: 'All sites', estimated_seconds: 330 },
+}
+
+// Resolve a ``ScanDepth`` preset to a concrete integer the backend
+// accepts. ``'all'`` resolves to the live catalog count (clamped to the
+// backend hard cap so a future regen doesn't accidentally exceed it).
+export function resolveScanDepth(
+  depth: ScanDepth,
+  catalogCount: number | undefined,
+): number {
+  if (depth === 'all') {
+    const total = catalogCount && catalogCount > 0 ? catalogCount : SCAN_DEPTH_HARD_CAP
+    return Math.min(total, SCAN_DEPTH_HARD_CAP)
+  }
+  return depth
+}
+
 export const IDENTITY_TYPES: readonly IdentityType[] = [
   'username',
   'email',
