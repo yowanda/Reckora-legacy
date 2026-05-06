@@ -11,12 +11,12 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 
 | Field | Value |
 | --- | --- |
-| Repo HEAD on main | `61d7716` (Phase 5g — scan-depth picker) |
+| Repo HEAD on main | `<pending push>` (Phase 5h-A/B/C — confidence + ML + verify floors) |
 | HF Space HEAD | `d5b2dac` (mirrors `853b7cc`) |
-| Active batch | **Phase 5h Layer A+B+C** (claimed precision floor knobs) |
-| Last batch shipped | Phase 5g — scan-all-sites picker |
-| Last update | 2026-05-06 (Batch 0 — ROADMAP unification) |
-| Test baseline | backend pytest **207 / 207** · mypy 17 src files · ruff clean · frontend lint+build green · e2e 3 / 3 |
+| Active batch | **Phase 5h Layer D** (post-claim link-liveness probe) |
+| Last batch shipped | Phase 5h-A/B/C — claimed precision floor as admin knobs |
+| Last update | 2026-05-06 (Batch 1 — claimed precision floor) |
+| Test baseline | backend pytest **217 / 217** · mypy 17 src files · ruff clean · frontend lint+build green · e2e 3 / 3 |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
 HEAD on main` and `Last update` lines are updated at the end of every batch
@@ -37,10 +37,10 @@ once `command git push origin main` returns and CI is green.
 > to homepage", no low-confidence borderline rows. Each demoted row
 > moves to `UNKNOWN` (not deleted) so it stays inspectable.
 
-- [~] **5h-A** — confidence floor knob (`min_claimed_confidence=60` default; admin-tunable)
-- [ ] **5h-B** — ML-confidence floor knob (`min_claimed_ml_confidence=50` default; admin-tunable)
-- [ ] **5h-C** — verify-required gate (`require_verify_for_claim=0` default; opt-in zero-FP mode)
-- [ ] **5h-D** — link-liveness probe: HEAD/GET on the human-facing display URL after every CLAIMED hit; demote on `404 / 410`, redirect-to-homepage, redirect-to-login/signup, soft-404
+- [x] **5h-A** — confidence floor knob (`min_claimed_confidence=60` default; admin-tunable)
+- [x] **5h-B** — ML-confidence floor knob (`min_claimed_ml_confidence=50` default; admin-tunable)
+- [x] **5h-C** — verify-required gate (`require_verify_for_claim=0` default; opt-in zero-FP mode)
+- [~] **5h-D** — link-liveness probe: HEAD/GET on the human-facing display URL after every CLAIMED hit; demote on `404 / 410`, redirect-to-homepage, redirect-to-login/signup, soft-404
 - [ ] **5h-E** — dual-URL check when `urlProbe ≠ url`: probe URL OK but display URL fails liveness → demote with `display-url-dead`
 - [ ] **5h-FE** — SPA signal badges (`Link verified live` green; `Demoted (link dead)` red) + `Stats` "Filtered (link)" / "Filtered (confidence)" buckets
 - [ ] **5h-deploy** — HF mirror sync + live click-test (scan `github` with `All sites`, click 5 random claimed rows, all must land on real profile)

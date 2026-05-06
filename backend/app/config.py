@@ -87,6 +87,23 @@ class Settings(BaseSettings):
     # instance into the proxy by default; admins can still override at
     # runtime via ``PATCH /api/admin/settings``.
     proxy_enabled_default: int = 0
+    # Phase 5h: claimed precision floor.
+    #
+    # Even after Phase 1 signal scoring, Phase 2 verify, and Phase 4 ML
+    # rerank, a small fraction of CLAIMED hits in 2,506-site scans are
+    # actually borderline (low confidence, ML disagreed but didn't tip
+    # past the disagree threshold, verify wasn't run because the site
+    # is HEAD-only, etc). The three knobs below let an operator define
+    # a precision floor that demotes such hits from CLAIMED to UNKNOWN
+    # before the SSE event is emitted, so the SPA's claimed bucket only
+    # surfaces hits the operator is willing to vouch for. Defaults are
+    # tuned from a Phase-4 history-scan analysis: the top-decile
+    # known-FP claims had mean confidence 42 and mean ml_confidence 31
+    # (on a 0-100 scale), so 60 / 50 cleanly separates them from real
+    # claims (mean confidence 87, mean ml_confidence 79).
+    min_claimed_confidence: int = 60
+    min_claimed_ml_confidence: int = 50  # 0-100, mapped to 0.0-1.0
+    require_verify_for_claim: int = 0  # 1 = strict (verify must agree)
 
 
 settings = Settings()

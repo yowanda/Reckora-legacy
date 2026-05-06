@@ -67,6 +67,86 @@ def _extract_min_confidence() -> int:
     return admin_settings_mod.effective_int("extract_min_confidence")
 
 
+def _admin_int(key: str) -> int:
+    """Return the admin-tunable knob value for ``key`` (Phase 5h helper).
+
+    Falls back to the ``Settings`` env-var default when the admin DB
+    isn't initialised yet (typical for unit tests that hit the checker
+    directly without a TestClient bootstrapping the schema). The
+    fallback path keeps Phase-5h floors active even pre-DB-init,
+    using whatever default the operator set via ``RECKORA_*`` env vars.
+    """
+    from . import admin_settings as admin_settings_mod
+
+    try:
+        return admin_settings_mod.effective_int(key)
+    except Exception:
+        spec = admin_settings_mod.KNOBS_BY_KEY.get(key)
+        if spec is None:
+            return int(getattr(settings, key))
+        return int(getattr(settings, spec.settings_attr))
+
+
+def _apply_claimed_precision_floor(primary: CheckResult) -> CheckResult:
+    """Phase 5h Layer A+B+C — demote borderline CLAIMED rows to UNKNOWN.
+
+    Three independent floors, each runtime-tunable via the admin-settings
+    table (``min_claimed_confidence`` / ``min_claimed_ml_confidence`` /
+    ``require_verify_for_claim``) so an operator can dial precision up
+    or down without a redeploy:
+
+    * **Layer A — confidence floor.** A rule-based confidence below
+      ``min_claimed_confidence`` (default ``60``) is treated as
+      borderline; the row is demoted with signal
+      ``claimed-below-confidence-floor:<n>``.
+    * **Layer B — ML floor.** When the Phase-4 ONNX reranker actually
+      produced a score (i.e. ``ml_confidence is not None``), a value
+      below ``min_claimed_ml_confidence`` (default ``50``, on the
+      0-100 scale) demotes with ``claimed-below-ml-floor:<n>``. Rows
+      without an ML score are unaffected — non-username scans and
+      ML-disabled deployments still flow through unchanged.
+    * **Layer C — verify-required.** When ``require_verify_for_claim``
+      is ``1``, only rows where the Phase-2 verify pass explicitly
+      agreed (``primary.verified is True``) stay CLAIMED. Rows where
+      verify was skipped (``verified is None``) or disagreed
+      (``verified is False``) demote with ``claimed-not-verified``.
+      Verify-disagreement already demotes via ``_verify_check`` —
+      this layer additionally catches the *skipped* case so an
+      operator can opt into a stricter "rule + verify both agreed"
+      mode without changing per-site verify behaviour.
+
+    The function is a no-op for non-CLAIMED rows, so it's safe to call
+    unconditionally at the end of every probe path. It mutates and
+    returns ``primary`` so the caller can treat it as a pipeline stage.
+    """
+    if primary.status is not Status.CLAIMED:
+        return primary
+
+    floor = _admin_int("min_claimed_confidence")
+    if floor > 0 and primary.confidence < floor:
+        primary.signals = [
+            *primary.signals,
+            f"claimed-below-confidence-floor:{primary.confidence}",
+        ]
+        primary.status = Status.UNKNOWN
+        return primary
+
+    ml_floor = _admin_int("min_claimed_ml_confidence")
+    if ml_floor > 0 and primary.ml_confidence is not None and primary.ml_confidence < ml_floor:
+        primary.signals = [
+            *primary.signals,
+            f"claimed-below-ml-floor:{primary.ml_confidence}",
+        ]
+        primary.status = Status.UNKNOWN
+        return primary
+
+    if _admin_int("require_verify_for_claim") == 1 and primary.verified is not True:
+        primary.signals = [*primary.signals, "claimed-not-verified"]
+        primary.status = Status.UNKNOWN
+
+    return primary
+
+
 class Status(StrEnum):
     CLAIMED = "claimed"
     FREE = "free"
@@ -669,6 +749,10 @@ async def check_site(
                 and (ml - (100 - rule)) >= disagree_threshold
             ):
                 primary.signals = [*primary.signals, f"ml-disagree:free-{ml}"]
+    # Phase 5h Layer A+B+C — claimed precision floor. Applied last so it
+    # sees the verify-adjusted confidence and the ML reranker's score;
+    # demotes borderline hits to UNKNOWN before they leave the checker.
+    primary = _apply_claimed_precision_floor(primary)
     return primary
 
 

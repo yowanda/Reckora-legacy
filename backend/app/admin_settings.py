@@ -114,6 +114,43 @@ KNOBS: tuple[KnobSpec, ...] = (
             "no-op — the runtime falls back to direct egress."
         ),
     ),
+    KnobSpec(
+        key="min_claimed_confidence",
+        settings_attr="min_claimed_confidence",
+        minimum=0,
+        maximum=100,
+        description=(
+            "Phase 5h: smallest rule-based confidence (0-100) a CLAIMED "
+            "result must reach to stay CLAIMED. Anything below is "
+            "demoted to UNKNOWN with a ``claimed-below-confidence-floor`` "
+            "signal. 0 disables the floor; 60 is the tuned default."
+        ),
+    ),
+    KnobSpec(
+        key="min_claimed_ml_confidence",
+        settings_attr="min_claimed_ml_confidence",
+        minimum=0,
+        maximum=100,
+        description=(
+            "Phase 5h: smallest ONNX-reranker confidence (0-100) a "
+            "CLAIMED result must reach to stay CLAIMED. Only applied "
+            "when the ML reranker actually produced a score; CLAIMED "
+            "rows without a score (non-username scans, ML disabled) "
+            "are unaffected. 0 disables this floor."
+        ),
+    ),
+    KnobSpec(
+        key="require_verify_for_claim",
+        settings_attr="require_verify_for_claim",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 5h: when 1, the Phase-2 verify pass must have "
+            "explicitly agreed for a hit to stay CLAIMED. Hits where "
+            "verify was skipped (HEAD-only sites) or disagreed are "
+            "demoted to UNKNOWN. Use this for zero-FP operator runs."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

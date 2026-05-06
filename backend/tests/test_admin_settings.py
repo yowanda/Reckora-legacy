@@ -109,6 +109,33 @@ def test_delete_unknown_key_returns_false(client: TestClient) -> None:
     assert admin_settings_mod.delete_override("not_a_real_knob") is False
 
 
+@pytest.mark.parametrize(
+    "key,initial,override,bad",
+    [
+        ("min_claimed_confidence", 60, 75, 200),
+        ("min_claimed_ml_confidence", 50, 65, -5),
+        ("require_verify_for_claim", 0, 1, 2),
+    ],
+)
+def test_phase_5h_floor_knobs_round_trip(
+    client: TestClient, key: str, initial: int, override: int, bad: int
+) -> None:
+    """Phase 5h Layer A+B+C — every claimed-precision-floor knob must
+    expose the standard set/get/reset/range behaviour so an operator
+    can tune precision live without a redeploy."""
+    # Fresh defaults.
+    assert admin_settings_mod.effective_int(key) == initial
+    # Set + read-back.
+    admin_settings_mod.set_override(key, override, actor="rootadmin")
+    assert admin_settings_mod.effective_int(key) == override
+    # Out-of-range upserts are rejected.
+    with pytest.raises(admin_settings_mod.KnobOutOfRange):
+        admin_settings_mod.set_override(key, bad, actor="rootadmin")
+    # Reset returns to default.
+    assert admin_settings_mod.delete_override(key) is True
+    assert admin_settings_mod.effective_int(key) == initial
+
+
 def test_describe_includes_default_and_override(client: TestClient) -> None:
     admin_settings_mod.set_override("graph_max_seed_hits", 12, actor="rootadmin")
     out = {row["key"]: row for row in admin_settings_mod.describe()}
@@ -133,13 +160,17 @@ def test_public_settings_returns_effective_map(
     r = client.get("/api/settings", headers=_hdr(member_token))
     assert r.status_code == 200
     data = r.json()["settings"]
-    # All four allowlisted knobs are present.
+    # All allowlisted knobs are present (4 graph/extract + 3 Phase 5h floors).
     assert set(data) == set(admin_settings_mod.ALLOWED_KEYS)
     # Defaults match Settings.
     assert data["graph_max_depth"] == 1
     assert data["graph_max_secondary"] == 5
     assert data["graph_max_seed_hits"] == 8
     assert data["extract_min_confidence"] == 70
+    # Phase 5h Layer A+B+C — claimed precision floor defaults.
+    assert data["min_claimed_confidence"] == 60
+    assert data["min_claimed_ml_confidence"] == 50
+    assert data["require_verify_for_claim"] == 0
 
 
 def test_public_settings_requires_auth(client: TestClient) -> None:

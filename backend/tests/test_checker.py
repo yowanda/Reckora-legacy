@@ -2,11 +2,41 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import httpx
 import pytest
 
 from app.checker import Status, check_site, is_valid_username
 from app.sites import Site
+
+
+@pytest.fixture(autouse=True)
+def _disable_phase_5h_floors_for_legacy_tests(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Phase 5h Layer A+B+C — disable the precision floor for legacy tests.
+
+    The pre-5h tests below assert specific CLAIMED outcomes on synthetic
+    fixtures whose confidence happens to fall below the production
+    floor (default 60). Rather than rewrite each fixture's
+    confidence-shaping signals, we monkey-patch the floor lookup to a
+    no-op for the entire module. New 5h-specific tests opt back in by
+    monkey-patching to a non-zero value inside the test body.
+    """
+    from app import checker as checker_mod
+
+    real_admin_int = checker_mod._admin_int
+
+    def _disabled_admin_int(key: str) -> int:
+        if key in {
+            "min_claimed_confidence",
+            "min_claimed_ml_confidence",
+            "require_verify_for_claim",
+        }:
+            return 0
+        return real_admin_int(key)
+
+    monkeypatch.setattr(checker_mod, "_admin_int", _disabled_admin_int)
+    yield
 
 
 def _site(**overrides) -> Site:
@@ -428,3 +458,187 @@ async def test_verify_pass_demotes_disagreement() -> None:
     assert result.status is Status.UNKNOWN
     assert result.verified is False
     assert any(s.startswith("verify-disagree") for s in result.signals)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5h Layer A+B+C — claimed precision floor.
+#
+# These tests opt **out** of the legacy ``_disable_phase_5h_floors_for_legacy_tests``
+# autouse fixture by monkey-patching ``_admin_int`` to a real value. Each
+# test asserts a specific demote signal so a regression that drops one
+# layer is caught immediately.
+# ---------------------------------------------------------------------------
+
+
+_PHASE_5H_KNOBS = {
+    "min_claimed_confidence",
+    "min_claimed_ml_confidence",
+    "require_verify_for_claim",
+}
+
+
+def _force_admin_int(monkeypatch: pytest.MonkeyPatch, knobs: dict[str, int]) -> None:
+    """Re-route ``checker._admin_int`` to a fixed mapping for the test.
+
+    All Phase-5h knobs default to ``0`` (no-op floor) unless explicitly
+    set by the caller — this isolates one layer at a time. Non-5h
+    knobs fall back to the env-var default.
+    """
+    from app import checker as checker_mod
+
+    def _fn(key: str) -> int:
+        if key in knobs:
+            return knobs[key]
+        if key in _PHASE_5H_KNOBS:
+            return 0
+        from app.admin_settings import KNOBS_BY_KEY
+        from app.config import settings as _settings
+
+        spec = KNOBS_BY_KEY.get(key)
+        if spec is None:
+            return int(getattr(_settings, key))
+        return int(getattr(_settings, spec.settings_attr))
+
+    monkeypatch.setattr(checker_mod, "_admin_int", _fn)
+
+
+async def test_5h_a_demotes_claimed_below_confidence_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Plain status_code claim → confidence 80 (see ``_confidence``).
+    # A 90 floor demotes it, exercising Layer A.
+    _force_admin_int(monkeypatch, {"min_claimed_confidence": 90})
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, text="hi"))
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(client, _site(), "alice", verify=False)
+    assert result.status is Status.UNKNOWN
+    assert any(s.startswith("claimed-below-confidence-floor:") for s in result.signals), (
+        result.signals
+    )
+
+
+async def test_5h_a_keeps_claimed_above_confidence_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Two-signal claim (presence + absence agree on a message site)
+    # → confidence 92+. Floor of 80 keeps it CLAIMED.
+    _force_admin_int(monkeypatch, {"min_claimed_confidence": 80})
+    site = _site(
+        check_type="message",
+        presense_strs=("user-profile",),
+        absence_strs=("user not found",),
+    )
+    transport = httpx.MockTransport(
+        lambda req: httpx.Response(200, text="<html>user-profile here, definitely real</html>")
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(client, site, "alice", verify=False)
+    assert result.status is Status.CLAIMED, result.signals
+    assert not any(s.startswith("claimed-below-confidence-floor:") for s in result.signals)
+
+
+async def test_5h_a_floor_zero_disables_demotion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Floor of 0 must be a no-op even for low-confidence claims.
+    _force_admin_int(monkeypatch, {"min_claimed_confidence": 0})
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, text="hi"))
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(client, _site(), "alice", verify=False)
+    assert result.status is Status.CLAIMED
+
+
+async def test_5h_b_demotes_claimed_below_ml_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _force_admin_int(
+        monkeypatch,
+        {"min_claimed_confidence": 0, "min_claimed_ml_confidence": 80},
+    )
+    # Inject a low ML score directly via a patched scorer so we don't
+    # depend on the ONNX model's training data.
+    from app import ml as ml_mod
+
+    monkeypatch.setattr(ml_mod, "score", lambda site, **_: 30, raising=False)
+
+    site = _site(
+        check_type="message",
+        presense_strs=("user-profile",),
+        absence_strs=("user not found",),
+    )
+    transport = httpx.MockTransport(
+        lambda req: httpx.Response(200, text="<html>user-profile here</html>")
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(client, site, "alice", verify=False)
+    assert result.status is Status.UNKNOWN
+    assert any(s.startswith("claimed-below-ml-floor:") for s in result.signals), result.signals
+
+
+async def test_5h_b_no_demotion_when_ml_score_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ML floor is a no-op when the reranker didn't produce a score.
+
+    Non-username scans (identity_type=email/phone/etc.) and ML-disabled
+    deployments leave ``ml_confidence`` at None — those paths must
+    flow through unchanged.
+    """
+    _force_admin_int(
+        monkeypatch,
+        {"min_claimed_confidence": 0, "min_claimed_ml_confidence": 80},
+    )
+    from app import ml as ml_mod
+
+    monkeypatch.setattr(ml_mod, "score", lambda *a, **k: None, raising=False)
+
+    site = _site(
+        check_type="message",
+        presense_strs=("user-profile",),
+        absence_strs=("user not found",),
+    )
+    transport = httpx.MockTransport(
+        lambda req: httpx.Response(200, text="<html>user-profile here</html>")
+    )
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(client, site, "alice", verify=False)
+    assert result.status is Status.CLAIMED, result.signals
+    assert result.ml_confidence is None
+
+
+async def test_5h_c_demotes_unverified_when_strict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _force_admin_int(
+        monkeypatch,
+        {
+            "min_claimed_confidence": 0,
+            "min_claimed_ml_confidence": 0,
+            "require_verify_for_claim": 1,
+        },
+    )
+    # verify=False → primary.verified stays None. Strict mode demotes.
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, text="hi"))
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(client, _site(), "alice", verify=False)
+    assert result.status is Status.UNKNOWN
+    assert "claimed-not-verified" in result.signals
+    assert result.verified is None
+
+
+async def test_5h_c_off_keeps_unverified_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _force_admin_int(
+        monkeypatch,
+        {
+            "min_claimed_confidence": 0,
+            "min_claimed_ml_confidence": 0,
+            "require_verify_for_claim": 0,
+        },
+    )
+    transport = httpx.MockTransport(lambda req: httpx.Response(200, text="hi"))
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(client, _site(), "alice", verify=False)
+    assert result.status is Status.CLAIMED
+    assert "claimed-not-verified" not in result.signals
