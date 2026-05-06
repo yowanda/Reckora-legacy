@@ -26,6 +26,16 @@ class Site:
     alexa_rank: int | None = None
     tags: tuple[str, ...] = ()
     error_strs: tuple[str, ...] = ()
+    # Phase 1: HEAD-only probe — for 'status_code' sites that only need the
+    # response code. Saves ~30% bandwidth on the cheap-classify subset.
+    head_only: bool = False
+    # Phase 1: ignore 403 — engines like XenForo emit 403 for valid users
+    # behind anti-scrape; treat 403 as inconclusive instead of FREE.
+    ignore_403: bool = False
+    # Phase 1: engine name (origin engine after build-time merge). Kept
+    # purely for telemetry / debugging — runtime classification doesn't
+    # branch on it.
+    engine: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +71,23 @@ def _coerce_site(name: str, raw: dict) -> Site | None:
     url = raw.get("url")
     if not url or "{username}" not in url:
         return None
+    headers_raw = raw.get("headers")
+    if isinstance(headers_raw, dict):
+        headers = tuple(headers_raw.items())
+    elif isinstance(headers_raw, list):
+        # Some engine merges produce a list of (k, v) pairs; tolerate that.
+        headers = tuple((str(h[0]), str(h[1])) for h in headers_raw if isinstance(h, (list, tuple)) and len(h) == 2)
+    else:
+        headers = ()
+    errors_raw = raw.get("errors")
+    if isinstance(errors_raw, dict):
+        # Maigret stores errors as {"keyword": "human-readable"} — we only
+        # care about the keyword for substring matching.
+        error_strs = tuple(errors_raw.keys())
+    elif isinstance(errors_raw, list):
+        error_strs = tuple(str(e) for e in errors_raw)
+    else:
+        error_strs = ()
     return Site(
         name=name,
         url=url,
@@ -69,10 +96,13 @@ def _coerce_site(name: str, raw: dict) -> Site | None:
         regex_check=raw.get("regexCheck"),
         absence_strs=tuple(raw.get("absenceStrs") or ()),
         presense_strs=tuple(raw.get("presenseStrs") or ()),
-        headers=tuple((raw.get("headers") or {}).items()),
+        headers=headers,
         alexa_rank=raw.get("alexaRank"),
         tags=tuple(raw.get("tags") or ()),
-        error_strs=tuple(raw.get("errors") or ()),
+        error_strs=error_strs,
+        head_only=bool(raw.get("requestHeadOnly")),
+        ignore_403=bool(raw.get("ignore403")),
+        engine=raw.get("engine"),
     )
 
 

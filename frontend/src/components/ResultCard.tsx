@@ -4,6 +4,7 @@ const statusMeta: Record<Status, { label: string; className: string; dot: string
   claimed: { label: 'claimed', className: 'border-ok/40 bg-ok/10 text-ok', dot: 'bg-ok' },
   free: { label: 'available', className: 'border-zinc-700 bg-zinc-800/30 text-zinc-400', dot: 'bg-zinc-500' },
   unknown: { label: 'unknown', className: 'border-warn/40 bg-warn/10 text-warn', dot: 'bg-warn' },
+  blocked: { label: 'blocked', className: 'border-purple-500/40 bg-purple-500/10 text-purple-300', dot: 'bg-purple-400' },
   error: { label: 'error', className: 'border-bad/40 bg-bad/10 text-bad', dot: 'bg-bad' },
   skipped: { label: 'skipped', className: 'border-zinc-800 bg-zinc-900/40 text-zinc-500', dot: 'bg-zinc-600' },
 }
@@ -40,11 +41,17 @@ export function ResultCard({ r }: { r: CheckResult }) {
             <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
             {meta.label}
           </span>
+          {typeof r.confidence === 'number' && r.status !== 'skipped' && (
+            <ConfidenceBadge value={r.confidence} status={r.status} />
+          )}
         </div>
         <p className="truncate text-xs text-zinc-500">
           {host}
           {r.http_status && <span className="ml-2 font-mono">[{r.http_status}]</span>}
           {r.elapsed_ms != null && <span className="ml-2">{r.elapsed_ms}ms</span>}
+          {r.attempts != null && r.attempts > 1 && (
+            <span className="ml-2 font-mono text-warn">retry×{r.attempts - 1}</span>
+          )}
         </p>
       </div>
       <ExternalIcon className="hidden h-4 w-4 text-zinc-500 transition group-hover:text-accent sm:block" />
@@ -58,6 +65,25 @@ function safeHost(url: string): string {
   } catch {
     return ''
   }
+}
+
+function ConfidenceBadge({ value, status }: { value: number; status: Status }) {
+  // Color the badge with the status color when confidence is high; fade it
+  // toward neutral when confidence is low so the user can see at a glance
+  // which classifications need a second look.
+  let color = 'text-zinc-400'
+  if (status === 'claimed') color = value >= 80 ? 'text-ok' : value >= 60 ? 'text-warn' : 'text-zinc-400'
+  else if (status === 'free') color = value >= 80 ? 'text-zinc-300' : 'text-zinc-500'
+  else if (status === 'blocked') color = 'text-purple-300'
+  else if (status === 'unknown') color = 'text-warn'
+  return (
+    <span
+      className={`chip border border-zinc-800 bg-zinc-900/40 !py-0 font-mono text-[10px] ${color}`}
+      title={`Confidence ${value}/100`}
+    >
+      {value}
+    </span>
+  )
 }
 
 function ExternalIcon({ className }: { className?: string }) {

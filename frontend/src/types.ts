@@ -1,4 +1,4 @@
-export type Status = 'claimed' | 'free' | 'unknown' | 'error' | 'skipped'
+export type Status = 'claimed' | 'free' | 'unknown' | 'blocked' | 'error' | 'skipped'
 
 export interface CheckResult {
   site: string
@@ -9,6 +9,11 @@ export interface CheckResult {
   http_status: number | null
   elapsed_ms: number | null
   error: string | null
+  // Phase 1 telemetry — backend emits these on every result. Older
+  // backends (before Phase 1) may omit them; treat as missing.
+  confidence?: number
+  signals?: string[]
+  attempts?: number
 }
 
 export interface SiteSummary {

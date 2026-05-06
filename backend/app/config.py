@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 60 * 30
     cache_max_entries: int = 512
     cors_origins: str = "*"
+    # Phase 1 retry knobs. With ``checker_max_attempts=3`` and
+    # ``checker_retry_base_delay=0.25`` the worst-case delay added on a
+    # site that always 503s is 0.25 + 0.5 = 0.75s.
+    checker_max_attempts: int = 3
+    checker_retry_base_delay: float = 0.25
 
 
 settings = Settings()

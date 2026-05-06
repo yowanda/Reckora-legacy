@@ -14,6 +14,7 @@ export function Stats({ progress }: Props) {
         <Pill label="claimed" value={counts.claimed} color="text-ok" />
         <Pill label="available" value={counts.free} color="text-zinc-400" />
         <Pill label="unknown" value={counts.unknown} color="text-warn" />
+        <Pill label="blocked" value={counts.blocked} color="text-purple-300" />
         <Pill label="error" value={counts.error} color="text-bad" />
         <span className="ml-auto text-xs text-zinc-500">
           {progress.done}/{progress.total} checked
@@ -43,7 +44,14 @@ function Pill({ label, value, color }: { label: string; value: number; color: st
 }
 
 function countByStatus(results: SearchProgress['results']) {
-  const out = { claimed: 0, free: 0, unknown: 0, error: 0, skipped: 0 }
+  const out: Record<string, number> = {
+    claimed: 0,
+    free: 0,
+    unknown: 0,
+    blocked: 0,
+    error: 0,
+    skipped: 0,
+  }
   for (const r of results) out[r.status] = (out[r.status] ?? 0) + 1
-  return out
+  return out as { claimed: number; free: number; unknown: number; blocked: number; error: number; skipped: number }
 }

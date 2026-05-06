@@ -11,7 +11,7 @@ import { fetchSites, streamSearch } from './api'
 import { useAuth } from './auth-context'
 import type { CheckResult, SearchProgress, SitesResponse } from './types'
 
-type StatusFilter = 'all' | 'claimed' | 'free' | 'unknown' | 'error'
+type StatusFilter = 'all' | 'claimed' | 'free' | 'unknown' | 'blocked' | 'error'
 type View = 'search' | 'admin'
 
 export default function App() {
@@ -92,11 +92,23 @@ function SearchView() {
   }
 
   const sortedResults = useMemo(() => {
-    const order = { claimed: 0, unknown: 1, error: 2, free: 3, skipped: 4 } as const
+    const order: Record<string, number> = {
+      claimed: 0,
+      blocked: 1,
+      unknown: 2,
+      error: 3,
+      free: 4,
+      skipped: 5,
+    }
     return [...progress.results].sort((a, b) => {
       const oa = order[a.status] ?? 99
       const ob = order[b.status] ?? 99
       if (oa !== ob) return oa - ob
+      // Within a status group, sort by descending confidence so the
+      // strongest signals show first. Falls back to site name when ties.
+      const ca = a.confidence ?? 0
+      const cb = b.confidence ?? 0
+      if (ca !== cb) return cb - ca
       return a.site.localeCompare(b.site)
     })
   }, [progress.results])
@@ -156,7 +168,7 @@ function SearchView() {
 
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-xs uppercase tracking-wider text-zinc-500">show</span>
-            {(['all', 'claimed', 'unknown', 'free', 'error'] as StatusFilter[]).map((s) => (
+            {(['all', 'claimed', 'unknown', 'blocked', 'free', 'error'] as StatusFilter[]).map((s) => (
               <button
                 key={s}
                 type="button"

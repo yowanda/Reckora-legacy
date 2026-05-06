@@ -359,8 +359,12 @@ async def _search_stream(req: SearchRequest, catalog: SiteCatalog) -> AsyncItera
         return
 
     collected: list[dict[str, Any]] = []
+    # Phase 1: enable HTTP/2 (httpx[http2] -> h2). Saves ~1 RTT per host on
+    # warm pools and is widely deployed across CMS-hosted sites. brotli is
+    # auto-negotiated via Accept-Encoding when httpx[brotli] is installed.
     async with httpx.AsyncClient(
         timeout=settings.request_timeout,
+        http2=True,
         limits=httpx.Limits(
             max_connections=settings.total_concurrency,
             max_keepalive_connections=settings.total_concurrency,

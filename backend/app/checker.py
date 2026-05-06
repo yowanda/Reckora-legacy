@@ -9,6 +9,25 @@ upstream site database:
   ``absenceStrs`` (free). Either set may be present; both are honored.
 - ``response_url``: if the final URL after redirects matches the templated
   URL, the username is claimed.
+
+Phase 1 additions on top of the maigret-equivalent classifier:
+
+- ``BLOCKED`` status — captures Cloudflare/Akamai/captcha pages, 429s,
+  and 451s. Without this, message-classified sites would either
+  false-positive (claimed) or false-negative (free) when the WAF replied
+  instead of the application. Maigret rolls these into ``ERROR``.
+- ``confidence`` 0-100 - surfaced on every result. Two-signal hits
+  (presence AND absence agree) score highest; single-signal classifies
+  score lower; status-only classifies score middle. This is what
+  downstream verification (Phase 2) and the SPA's confidence-sorted view
+  rely on.
+- ``HEAD`` probe for ``status_code`` sites that opt in via
+  ``request_head_only`` — the body isn't needed to classify, so we save
+  ~all of its bandwidth.
+- Smart retry with exponential backoff for transient transport errors
+  (timeout, server-errors 502/503/504, ``RemoteProtocolError``). Without
+  retries, bursty packet loss inflates the ``ERROR`` rate and erases
+  recall on long scans.
 """
 from __future__ import annotations
 
@@ -16,7 +35,7 @@ import asyncio
 import re
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -30,6 +49,7 @@ class Status(StrEnum):
     CLAIMED = "claimed"
     FREE = "free"
     UNKNOWN = "unknown"
+    BLOCKED = "blocked"
     ERROR = "error"
     SKIPPED = "skipped"
 
@@ -44,6 +64,9 @@ class CheckResult:
     http_status: int | None = None
     elapsed_ms: int | None = None
     error: str | None = None
+    confidence: int = 0
+    signals: list[str] = field(default_factory=list)
+    attempts: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +78,9 @@ class CheckResult:
             "http_status": self.http_status,
             "elapsed_ms": self.elapsed_ms,
             "error": self.error,
+            "confidence": self.confidence,
+            "signals": self.signals,
+            "attempts": self.attempts,
         }
 
 
@@ -74,40 +100,158 @@ def _matches_regex(username: str, pattern: str | None) -> bool:
         return True
 
 
-def _classify_message(body: str, site: Site) -> Status:
+# Anti-bot fingerprints that survive across operators (Cloudflare, Akamai,
+# Sucuri, generic captcha). Lower-cased substring match against the body.
+_BLOCK_FINGERPRINTS: tuple[str, ...] = (
+    # Cloudflare
+    "just a moment",
+    "cf-browser-verification",
+    "cf_chl_opt",
+    "cf-please-wait",
+    "checking your browser",
+    "challenge-platform",
+    # Akamai
+    "akamaized.net",
+    "reference&#32;#",
+    # Sucuri / Imperva / generic WAF
+    "sucuri website firewall",
+    "incapsula incident",
+    "imperva",
+    # Captcha widgets
+    "g-recaptcha",
+    "h-captcha",
+    "data-sitekey=",
+    "/recaptcha/api.js",
+)
+
+
+def _is_blocked_body(body: str) -> bool:
+    """True iff the response body looks like an anti-bot interstitial."""
+    if not body:
+        return False
+    low = body.lower()
+    return any(fp in low for fp in _BLOCK_FINGERPRINTS)
+
+
+def _classify_message(body: str, site: Site) -> tuple[Status, list[str]]:
+    """Return (status, signals) — signals are the human-readable evidence
+    strings used for confidence scoring."""
+    signals: list[str] = []
     presense_hit = any(s in body for s in site.presense_strs) if site.presense_strs else None
     absence_hit = any(s in body for s in site.absence_strs) if site.absence_strs else None
 
+    if presense_hit:
+        signals.append("presence-match")
+    if absence_hit:
+        signals.append("absence-match")
+
     if presense_hit and not absence_hit:
-        return Status.CLAIMED
+        return Status.CLAIMED, signals
     if absence_hit and not presense_hit:
-        return Status.FREE
+        return Status.FREE, signals
     if site.absence_strs and not absence_hit and not site.presense_strs:
-        return Status.CLAIMED
+        signals.append("absence-miss")
+        return Status.CLAIMED, signals
     if site.presense_strs and not presense_hit and not site.absence_strs:
-        return Status.FREE
-    return Status.UNKNOWN
+        signals.append("presence-miss")
+        return Status.FREE, signals
+    return Status.UNKNOWN, signals
 
 
-def _classify_response(resp: httpx.Response, site: Site) -> Status:
+def _classify_response(resp: httpx.Response, body: str, site: Site) -> tuple[Status, list[str]]:
+    if site.error_strs and any(s in body for s in site.error_strs):
+        return Status.ERROR, ["error-string-match"]
     if site.check_type == "status_code":
         if 200 <= resp.status_code < 300:
-            return Status.CLAIMED
+            return Status.CLAIMED, [f"status-{resp.status_code}"]
         if resp.status_code in (404, 410):
-            return Status.FREE
-        return Status.UNKNOWN
+            return Status.FREE, [f"status-{resp.status_code}"]
+        return Status.UNKNOWN, [f"status-{resp.status_code}"]
     if site.check_type == "response_url":
         target = site.url.replace("{username}", "USERNAME").rstrip("/")
         final = str(resp.url).rstrip("/")
-        # If we ended up somewhere different, consider it free.
         if "USERNAME" in target:
             prefix = target.split("USERNAME", 1)[0]
             if final.startswith(prefix.rstrip("/")):
-                return Status.CLAIMED
-            return Status.FREE
-        return Status.CLAIMED if final.startswith(target) else Status.FREE
+                return Status.CLAIMED, ["response-url-prefix-match"]
+            return Status.FREE, ["response-url-redirected"]
+        return (
+            (Status.CLAIMED, ["response-url-match"])
+            if final.startswith(target)
+            else (Status.FREE, ["response-url-mismatch"])
+        )
     # message
-    return _classify_message(resp.text, site)
+    return _classify_message(body, site)
+
+
+def _confidence(site: Site, status: Status, http_status: int | None, signals: list[str]) -> int:
+    """Map (site type, status, signals) to a 0-100 confidence score.
+
+    The SPA sorts results by ``status, -confidence`` so the user sees
+    high-confidence claims first within each group. Phase-2 will re-probe
+    any CLAIMED with ``confidence < 70`` using a different UA + referrer.
+    """
+    presence = "presence-match" in signals
+    absence = "absence-match" in signals
+    if status == Status.CLAIMED:
+        # Both signals agreed → very high confidence.
+        if presence and not absence:
+            base = 92 if site.check_type == "message" else 88
+        elif site.check_type == "message":
+            base = 70
+        elif site.check_type == "status_code":
+            # Pure 2xx with no body parse — middle confidence; tied to the
+            # site's reputation (rank).
+            base = 80
+        elif site.check_type == "response_url":
+            base = 85
+        else:
+            base = 60
+    elif status == Status.FREE:
+        if absence and not presence:
+            base = 90 if site.check_type == "message" else 85
+        elif site.check_type == "message":
+            base = 65
+        elif http_status in (404, 410):
+            base = 88
+        elif site.check_type == "response_url":
+            base = 82
+        else:
+            base = 55
+    elif status == Status.BLOCKED:
+        # The site is up; we just couldn't see past its WAF. Treat as
+        # "we know nothing useful" but worth showing.
+        base = 40
+    elif status == Status.UNKNOWN:
+        base = 25
+    elif status == Status.ERROR:
+        base = 0
+    else:  # SKIPPED
+        base = 100  # the skip itself is 100% confident; just not informative
+
+    # Ranked sites are slightly more trustworthy than long-tail unranked.
+    if site.alexa_rank:
+        if site.alexa_rank <= 1_000:
+            base = min(100, base + 4)
+        elif site.alexa_rank <= 10_000:
+            base = min(100, base + 2)
+    return base
+
+
+# Status codes that are usually transient and worth a single retry. 5xx is
+# server-side flakes; 408 is a client-timeout signal from the LB.
+_RETRYABLE_STATUS = frozenset({408, 502, 503, 504})
+
+
+async def _do_probe(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    headers: dict[str, str],
+) -> httpx.Response:
+    if method == "HEAD":
+        return await client.head(url, headers=headers, follow_redirects=True)
+    return await client.get(url, headers=headers, follow_redirects=True)
 
 
 async def check_site(client: httpx.AsyncClient, site: Site, username: str) -> CheckResult:
@@ -120,38 +264,118 @@ async def check_site(client: httpx.AsyncClient, site: Site, username: str) -> Ch
             url_main=site.url_main,
             tags=list(site.tags),
             error="username does not match site regex",
+            confidence=100,
+            signals=["regex-mismatch"],
         )
 
     started = time.perf_counter()
-    headers = {"User-Agent": settings.user_agent}
+    headers = {
+        "User-Agent": settings.user_agent,
+        # httpx negotiates these automatically when the corresponding extras
+        # are installed (h2, brotli). Setting them explicitly lets us be
+        # robust if a site honours only an Accept-Encoding it sees.
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
     headers.update(dict(site.headers))
-    try:
-        resp = await client.get(url, headers=headers, follow_redirects=True)
-    except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as e:
+
+    method = "HEAD" if (site.head_only and site.check_type == "status_code") else "GET"
+
+    resp: httpx.Response | None = None
+    attempts = 0
+    for attempt in range(settings.checker_max_attempts):
+        attempts = attempt + 1
+        try:
+            resp = await _do_probe(client, method, url, headers)
+        except (httpx.TimeoutException, httpx.RemoteProtocolError) as e:
+            if attempt + 1 < settings.checker_max_attempts:
+                await asyncio.sleep(settings.checker_retry_base_delay * (2**attempt))
+                continue
+            return CheckResult(
+                site=site.name,
+                status=Status.ERROR,
+                url=url,
+                url_main=site.url_main,
+                tags=list(site.tags),
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+                error=type(e).__name__,
+                attempts=attempts,
+            )
+        except httpx.NetworkError as e:
+            return CheckResult(
+                site=site.name,
+                status=Status.ERROR,
+                url=url,
+                url_main=site.url_main,
+                tags=list(site.tags),
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+                error=type(e).__name__,
+                attempts=attempts,
+            )
+        except httpx.HTTPError as e:  # pragma: no cover - safety net
+            return CheckResult(
+                site=site.name,
+                status=Status.ERROR,
+                url=url,
+                url_main=site.url_main,
+                tags=list(site.tags),
+                elapsed_ms=int((time.perf_counter() - started) * 1000),
+                error=type(e).__name__,
+                attempts=attempts,
+            )
+
+        if resp.status_code in _RETRYABLE_STATUS and attempt + 1 < settings.checker_max_attempts:
+            await asyncio.sleep(settings.checker_retry_base_delay * (2**attempt))
+            continue
+        break
+
+    assert resp is not None  # mypy: loop above either returned or assigned
+
+    # Body fetch — for HEAD probes we have no body, which is fine for
+    # status_code-only classification.
+    body = ""
+    if method != "HEAD":
+        try:
+            body = resp.text
+        except Exception:  # pragma: no cover - decode safety
+            body = ""
+
+    # Anti-bot detection lives ABOVE the per-checkType classifier so it
+    # short-circuits status-only classifies (which would otherwise label a
+    # Cloudflare interstitial as CLAIMED on the 200).
+    blocked_signals: list[str] = []
+    if resp.status_code == 429:
+        blocked_signals.append("status-429")
+    elif resp.status_code == 451:
+        blocked_signals.append("status-451")
+    elif resp.status_code == 403 and site.ignore_403:
+        blocked_signals.append("status-403-ignored")
+    if body and _is_blocked_body(body):
+        blocked_signals.append("body-fingerprint-block")
+    if blocked_signals:
         return CheckResult(
             site=site.name,
-            status=Status.ERROR,
+            status=Status.BLOCKED,
             url=url,
             url_main=site.url_main,
             tags=list(site.tags),
+            http_status=resp.status_code,
             elapsed_ms=int((time.perf_counter() - started) * 1000),
-            error=type(e).__name__,
-        )
-    except httpx.HTTPError as e:  # pragma: no cover - generic safety net
-        return CheckResult(
-            site=site.name,
-            status=Status.ERROR,
-            url=url,
-            url_main=site.url_main,
-            tags=list(site.tags),
-            elapsed_ms=int((time.perf_counter() - started) * 1000),
-            error=type(e).__name__,
+            confidence=_confidence(site, Status.BLOCKED, resp.status_code, blocked_signals),
+            signals=blocked_signals,
+            attempts=attempts,
         )
 
-    status = _classify_response(resp, site)
-    # Treat upstream ratelimit / blocks as unknown rather than free.
+    status, signals = _classify_response(resp, body, site)
+    # Treat upstream ratelimit / blocks as unknown rather than free if we
+    # somehow missed them above.
     if resp.status_code in (401, 403, 429, 451) and status == Status.FREE:
         status = Status.UNKNOWN
+        signals = [*signals, f"status-{resp.status_code}-block-overrides-free"]
+    if site.ignore_403 and resp.status_code == 403 and status == Status.FREE:
+        status = Status.UNKNOWN
+        signals = [*signals, "site-ignores-403"]
 
     return CheckResult(
         site=site.name,
@@ -161,6 +385,9 @@ async def check_site(client: httpx.AsyncClient, site: Site, username: str) -> Ch
         tags=list(site.tags),
         http_status=resp.status_code,
         elapsed_ms=int((time.perf_counter() - started) * 1000),
+        confidence=_confidence(site, status, resp.status_code, signals),
+        signals=signals,
+        attempts=attempts,
     )
 
 
@@ -172,14 +399,18 @@ async def stream_checks(
 ) -> AsyncIterator[CheckResult]:
     """Run checks concurrently and yield each result as it arrives."""
     owned_client = client is None
-    client = client or httpx.AsyncClient(
-        timeout=settings.request_timeout,
-        http2=False,
-        limits=httpx.Limits(
-            max_connections=settings.total_concurrency,
-            max_keepalive_connections=settings.total_concurrency,
-        ),
-    )
+    if owned_client:
+        # http2=True saves ~1 RTT per host on warm pools; many CMS-hosted
+        # sites support it. The h2 pkg is pulled in via httpx[http2].
+        client = httpx.AsyncClient(
+            timeout=settings.request_timeout,
+            http2=True,
+            limits=httpx.Limits(
+                max_connections=settings.total_concurrency,
+                max_keepalive_connections=settings.total_concurrency,
+            ),
+        )
+    assert client is not None
 
     sem = asyncio.Semaphore(settings.total_concurrency)
     queue: asyncio.Queue[CheckResult | None] = asyncio.Queue()

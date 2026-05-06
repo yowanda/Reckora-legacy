@@ -13,7 +13,7 @@ license: mit
 # Reckora
 
 > Recon any username across the open web. Concurrent OSINT lookup over
-> 500+ public sites with a streaming API and a modern UI — gated behind a
+> 2,500+ public sites with a streaming API and a modern UI — gated behind a
 > members-only login that admins fully control.
 
 🌐 **Live demo**: <https://yesmyyt-cacadoxx.hf.space>

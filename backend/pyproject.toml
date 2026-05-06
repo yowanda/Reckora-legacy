@@ -7,7 +7,9 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi[standard]>=0.115.0",
     "uvicorn[standard]>=0.30.0",
-    "httpx[http2]>=0.27.0",
+    # http2 saves ~1 RTT on warm pools; brotli unlocks responses from CDNs
+    # that only send `br` when the client advertises it (most modern WAFs).
+    "httpx[http2,brotli]>=0.27.0",
     "pydantic>=2.8.0",
     "pydantic-settings>=2.4.0",
     "slowapi>=0.1.9",
