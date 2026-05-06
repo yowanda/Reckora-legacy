@@ -259,20 +259,50 @@ response body, so non-browser clients (curl, scripts) can authenticate via
 ## Tests & linting
 
 ```bash
-cd backend  && uv run ruff check . && uv run pytest
+cd backend  && uv run ruff check . && uv run ruff format --check . \
+            && uv run mypy && uv run pytest
 cd frontend && pnpm lint && pnpm tsc --noEmit && pnpm build
+cd frontend && pnpm e2e:install && pnpm e2e   # Playwright smoke tests
 ```
 
-CI runs both on every push (`.github/workflows/ci.yml`).
+CI runs three jobs on every push (`.github/workflows/ci.yml`):
+
+1. `backend` — ruff lint + ruff format check + mypy + pytest.
+2. `frontend` — eslint + `tsc --noEmit` + `vite build`.
+3. `e2e` — builds the SPA, mounts it in the backend, boots `uvicorn`
+   with a seed admin, and runs Playwright tests against the
+   single-origin server. Failures upload a `playwright-report`
+   artifact for offline triage.
+
+### Pre-commit hooks
+
+The repo ships with a `.pre-commit-config.yaml`. After the first clone:
+
+```bash
+uv tool install pre-commit  # or: pip install pre-commit
+pre-commit install
+```
+
+This wires up trailing-whitespace, end-of-file-fixer, ruff (lint + fix),
+ruff-format, and a local `eslint --max-warnings=0` hook on the frontend
+sources. The hooks deliberately stay fast; full pytest and Playwright
+runs live in CI so `git commit` doesn't block on them.
 
 ### What's covered
 
-- **Backend (27 pytest cases)** — health endpoint, auth gate on
+- **Backend (76 pytest cases)** — health endpoint, auth gate on
   `/api/sites` and `/api/search`, login (success / wrong password /
   rate-limit), `/api/auth/me` round-trip, admin CRUD on
   `/api/admin/members`, role-gating (member → 403), self-delete and
-  last-admin guards.
+  last-admin guards, scan history + diff (Phase 4), site overrides
+  CRUD (Phase 4), ML feature builder (Phase 4), socid-extractor
+  integration (Phase 3).
+- **Backend type-check** — `mypy` (zero errors against `app/`,
+  `ignore_missing_imports = true` for third-party deps without stubs).
 - **Frontend** — ESLint + `tsc --noEmit` + production `vite build`.
+- **End-to-end (Playwright)** — anonymous load shows login + gates
+  `/api/sites`, wrong password renders the static error message, admin
+  login lands on the search view with the **Admin** tab visible.
 
 ### End-to-end verified flows
 

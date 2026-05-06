@@ -1,4 +1,5 @@
 """Unit tests for the per-site checker."""
+
 from __future__ import annotations
 
 import httpx
@@ -198,6 +199,7 @@ async def test_ignore_403_keeps_claim_open() -> None:
 async def test_prewarm_sends_url_main_first() -> None:
     """Sites flagged ``prewarm`` must hit ``url_main`` before the probe."""
     import asyncio
+
     seen: list[str] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -224,6 +226,7 @@ async def test_prewarm_sends_url_main_first() -> None:
 async def test_prewarm_runs_only_once_per_host() -> None:
     """Repeated checks against the same host must NOT re-prewarm."""
     import asyncio
+
     seen: list[str] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -235,7 +238,9 @@ async def test_prewarm_runs_only_once_per_host() -> None:
     lock = asyncio.Lock()
     site = _site(prewarm=True)
     async with httpx.AsyncClient(transport=transport) as client:
-        await check_site(client, site, "alice", prewarm_cache=cache, prewarm_lock=lock, verify=False)
+        await check_site(
+            client, site, "alice", prewarm_cache=cache, prewarm_lock=lock, verify=False
+        )
         await check_site(client, site, "bob", prewarm_cache=cache, prewarm_lock=lock, verify=False)
     # Only ONE prewarm hit (first call), then 2 probe hits
     prewarm_hits = [u for u in seen if u == "https://example.com/"]
@@ -247,6 +252,7 @@ async def test_prewarm_runs_only_once_per_host() -> None:
 async def test_verify_pass_promotes_agreement() -> None:
     """When primary CLAIMED and verify also CLAIMED, ``verified=True``."""
     import asyncio
+
     seen_uas: list[str] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -303,8 +309,10 @@ async def test_cffi_rescue_replaces_blocked_when_chrome_passes() -> None:
     class MockSession:
         async def get(self, url, allow_redirects=True, headers=None):
             return MockResp(200, "user profile here for alice", url)
+
         async def head(self, url, allow_redirects=True, headers=None):
             return MockResp(200, "", url)
+
         async def close(self) -> None:
             return None
 
@@ -314,9 +322,13 @@ async def test_cffi_rescue_replaces_blocked_when_chrome_passes() -> None:
     site = _site(check_type="message", presense_strs=("user profile",))
     async with httpx.AsyncClient(transport=transport) as client:
         result = await check_site(
-            client, site, "alice",
-            prewarm_cache=set(), prewarm_lock=asyncio.Lock(),
-            verify=False, cffi_rescue=rescue,
+            client,
+            site,
+            "alice",
+            prewarm_cache=set(),
+            prewarm_lock=asyncio.Lock(),
+            verify=False,
+            cffi_rescue=rescue,
         )
     # The httpx pass landed BLOCKED (CF body), but the cffi rescue should
     # have promoted the result back to CLAIMED.
@@ -327,6 +339,7 @@ async def test_cffi_rescue_replaces_blocked_when_chrome_passes() -> None:
 async def test_verify_pass_demotes_disagreement() -> None:
     """When primary CLAIMED but verify FREE, status falls to UNKNOWN."""
     import asyncio
+
     state = {"calls": 0}
 
     def handler(req: httpx.Request) -> httpx.Response:

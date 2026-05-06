@@ -1,4 +1,5 @@
 """Phase 4: live DB editor tests — site_overrides table + merge logic."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -34,6 +35,7 @@ def _hdr(token: str) -> dict[str, str]:
 def _isolate_overrides(client: TestClient, admin_token: str) -> Iterator[None]:
     """Wipe overrides before & after each test so they can't leak."""
     from app.auth import db_connection
+
     with db_connection() as conn:
         conn.execute("DELETE FROM site_overrides")
     reload_catalog()
@@ -166,9 +168,7 @@ def test_admin_reload_endpoint(client: TestClient, admin_token: str) -> None:
     assert r.json()["sites"] > 100
 
 
-def test_admin_upsert_invalid_operation_rejected(
-    client: TestClient, admin_token: str
-) -> None:
+def test_admin_upsert_invalid_operation_rejected(client: TestClient, admin_token: str) -> None:
     r = client.post(
         "/api/admin/sites",
         headers=_hdr(admin_token),

@@ -73,3 +73,19 @@ ignore = ["E501", "B008"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["app"]
+# Bundled deps without type stubs (curl_cffi, socid_extractor, onnxruntime,
+# slowapi). Their surface in our code is small and well-covered by tests,
+# so skipping their stub validation keeps the gate honest without blocking
+# on third-party type debt.
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+# Per-module strictness will graduate over time. For now we gate on the
+# zero-error baseline established in this commit; tightening to --strict
+# lives in a follow-up phase once the existing modules are annotated.
+check_untyped_defs = true

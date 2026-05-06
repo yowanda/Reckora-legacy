@@ -14,6 +14,7 @@ Schema layout:
 ml_confidence, url, parent_username]`` tuples. We keep the rolling
 window per member capped at ``settings.scan_history_max_per_user``.
 """
+
 from __future__ import annotations
 
 import json
@@ -269,17 +270,13 @@ def diff_scans(
             if b_row.get("status") == "claimed":
                 newly_claimed.append({"site": site, **b_row})
             else:
-                status_changed.append(
-                    {"site": site, "from": None, "to": b_row.get("status")}
-                )
+                status_changed.append({"site": site, "from": None, "to": b_row.get("status")})
             continue
         if b_row is None and a_row is not None:
             if a_row.get("status") == "claimed":
                 no_longer_claimed.append({"site": site, **a_row})
             else:
-                status_changed.append(
-                    {"site": site, "from": a_row.get("status"), "to": None}
-                )
+                status_changed.append({"site": site, "from": a_row.get("status"), "to": None})
             continue
         # Both present.
         assert a_row is not None and b_row is not None
@@ -291,9 +288,7 @@ def diff_scans(
             elif a_status == "claimed":
                 no_longer_claimed.append({"site": site, **a_row, "new_status": b_status})
             else:
-                status_changed.append(
-                    {"site": site, "from": a_status, "to": b_status}
-                )
+                status_changed.append({"site": site, "from": a_status, "to": b_status})
             continue
         # Same status — check confidence drift.
         ac = a_row.get("confidence") or 0

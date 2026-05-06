@@ -1,4 +1,5 @@
 """Smoke tests for the site catalog loader."""
+
 from __future__ import annotations
 
 from app.sites import load_catalog

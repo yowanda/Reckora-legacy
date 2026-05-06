@@ -1,0 +1,37 @@
+# Run on every commit. Mirrors the GitHub Actions `ci` workflow so problems
+# fail fast locally instead of on PR. Install with `pre-commit install` from
+# repo root after `pip install pre-commit` (or `uv tool install pre-commit`).
+#
+# Hooks intentionally only touch fast checks; full pytest/eslint/tsc runs
+# live in CI to keep `git commit` snappy.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint (frontend)
+        language: system
+        entry: bash -c 'cd frontend && pnpm exec eslint --max-warnings=0'
+        files: ^frontend/src/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false

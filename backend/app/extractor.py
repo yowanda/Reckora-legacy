@@ -10,6 +10,7 @@ meta tags.
 The module is intentionally pure-string/regex with **no I/O** — it
 operates on a body the caller already fetched.
 """
+
 from __future__ import annotations
 
 import re
@@ -118,40 +119,115 @@ def _extract_emails(body: str) -> list[str]:
 # both link discovery (paired with an href= anchor below) and for
 # extracting the username out of an already-known URL.
 _SOCIAL_URL_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("github", re.compile(r'https?://github\.com/([A-Za-z0-9_.\-]+)/?', re.I)),
-    ("twitter", re.compile(r'https?://(?:twitter\.com|x\.com)/([A-Za-z0-9_]+)/?', re.I)),
-    ("instagram", re.compile(r'https?://(?:www\.)?instagram\.com/([A-Za-z0-9_.]+)/?', re.I)),
-    ("linkedin", re.compile(r'https?://(?:www\.)?linkedin\.com/in/([A-Za-z0-9_.\-]+)/?', re.I)),
-    ("facebook", re.compile(r'https?://(?:www\.)?facebook\.com/([A-Za-z0-9_.]+)/?', re.I)),
-    ("youtube", re.compile(r'https?://(?:www\.)?youtube\.com/(?:@|channel/|user/)([A-Za-z0-9_.\-]+)/?', re.I)),
-    ("telegram", re.compile(r'https?://t\.me/([A-Za-z0-9_]+)/?', re.I)),
-    ("reddit", re.compile(r'https?://(?:www\.)?reddit\.com/user/([A-Za-z0-9_.\-]+)/?', re.I)),
-    ("mastodon", re.compile(r'https?://[a-z0-9.\-]+/@([A-Za-z0-9_]+)/?', re.I)),
-    ("keybase", re.compile(r'https?://keybase\.io/([A-Za-z0-9_]+)/?', re.I)),
+    ("github", re.compile(r"https?://github\.com/([A-Za-z0-9_.\-]+)/?", re.I)),
+    ("twitter", re.compile(r"https?://(?:twitter\.com|x\.com)/([A-Za-z0-9_]+)/?", re.I)),
+    ("instagram", re.compile(r"https?://(?:www\.)?instagram\.com/([A-Za-z0-9_.]+)/?", re.I)),
+    ("linkedin", re.compile(r"https?://(?:www\.)?linkedin\.com/in/([A-Za-z0-9_.\-]+)/?", re.I)),
+    ("facebook", re.compile(r"https?://(?:www\.)?facebook\.com/([A-Za-z0-9_.]+)/?", re.I)),
+    (
+        "youtube",
+        re.compile(
+            r"https?://(?:www\.)?youtube\.com/(?:@|channel/|user/)([A-Za-z0-9_.\-]+)/?", re.I
+        ),
+    ),
+    ("telegram", re.compile(r"https?://t\.me/([A-Za-z0-9_]+)/?", re.I)),
+    ("reddit", re.compile(r"https?://(?:www\.)?reddit\.com/user/([A-Za-z0-9_.\-]+)/?", re.I)),
+    ("mastodon", re.compile(r"https?://[a-z0-9.\-]+/@([A-Za-z0-9_]+)/?", re.I)),
+    ("keybase", re.compile(r"https?://keybase\.io/([A-Za-z0-9_]+)/?", re.I)),
 ]
 
-_HREF_RE = re.compile(r'''href=["']([^"']+)["']''', re.IGNORECASE)
+_HREF_RE = re.compile(r"""href=["']([^"']+)["']""", re.IGNORECASE)
 
 # Username-like values we always skip (too generic to be real alt-accounts,
 # or platform/host names that show up in cross-references rather than as
 # real account identifiers).
-_SKIP_USERNAMES: frozenset[str] = frozenset({
-    # Generic site paths
-    "about", "search", "login", "signup", "register", "help", "terms",
-    "privacy", "settings", "admin", "home", "index", "static", "assets",
-    "api", "undefined", "null", "none", "share", "explore", "notifications",
-    "messages", "tags", "categories", "trending", "discover", "browse",
-    "popular", "new", "top", "feed", "stories", "watch", "channel", "user",
-    "channels", "users", "profile", "profiles", "account", "accounts",
-    "dashboard", "embed", "widget", "auth", "oauth", "callback",
-    # Platform names that frequently appear in <a> chrome / footers
-    "github", "twitter", "facebook", "instagram", "linkedin", "youtube",
-    "reddit", "telegram", "tiktok", "pinterest", "tumblr", "twitch",
-    "mastodon", "keybase", "spotify", "soundcloud", "vimeo", "flickr",
-    "smugmug", "wordpress", "blogger", "medium", "substack", "patreon",
-    "discord", "slack", "skype", "snapchat", "whatsapp", "wechat",
-    "verge", "theverge", "envato", "launchpadstatus",
-})
+_SKIP_USERNAMES: frozenset[str] = frozenset(
+    {
+        # Generic site paths
+        "about",
+        "search",
+        "login",
+        "signup",
+        "register",
+        "help",
+        "terms",
+        "privacy",
+        "settings",
+        "admin",
+        "home",
+        "index",
+        "static",
+        "assets",
+        "api",
+        "undefined",
+        "null",
+        "none",
+        "share",
+        "explore",
+        "notifications",
+        "messages",
+        "tags",
+        "categories",
+        "trending",
+        "discover",
+        "browse",
+        "popular",
+        "new",
+        "top",
+        "feed",
+        "stories",
+        "watch",
+        "channel",
+        "user",
+        "channels",
+        "users",
+        "profile",
+        "profiles",
+        "account",
+        "accounts",
+        "dashboard",
+        "embed",
+        "widget",
+        "auth",
+        "oauth",
+        "callback",
+        # Platform names that frequently appear in <a> chrome / footers
+        "github",
+        "twitter",
+        "facebook",
+        "instagram",
+        "linkedin",
+        "youtube",
+        "reddit",
+        "telegram",
+        "tiktok",
+        "pinterest",
+        "tumblr",
+        "twitch",
+        "mastodon",
+        "keybase",
+        "spotify",
+        "soundcloud",
+        "vimeo",
+        "flickr",
+        "smugmug",
+        "wordpress",
+        "blogger",
+        "medium",
+        "substack",
+        "patreon",
+        "discord",
+        "slack",
+        "skype",
+        "snapchat",
+        "whatsapp",
+        "wechat",
+        "verge",
+        "theverge",
+        "envato",
+        "launchpadstatus",
+    }
+)
 
 
 _TLD_SUFFIXES: tuple[str, ...] = ("com", "net", "org", "io", "co", "app", "dev")

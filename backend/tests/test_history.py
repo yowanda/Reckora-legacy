@@ -1,4 +1,5 @@
 """Phase 4: scan history + diff tests."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -33,6 +34,7 @@ def _hdr(token: str) -> dict[str, str]:
 @pytest.fixture(autouse=True)
 def _isolate_history() -> Iterator[None]:
     from app.auth import db_connection
+
     with db_connection() as conn:
         conn.execute("DELETE FROM scans")
     yield
@@ -65,15 +67,25 @@ def test_history_list_starts_empty(client: TestClient, admin_token: str) -> None
     assert r.json() == {"scans": []}
 
 
-def test_history_records_basic_scan_and_lists_it(
-    client: TestClient, admin_token: str
-) -> None:
+def test_history_records_basic_scan_and_lists_it(client: TestClient, admin_token: str) -> None:
     scan_id = _seed_scan(
         _MEMBER,
         "alice",
         [
-            {"site": "github", "status": "claimed", "confidence": 95, "ml_confidence": 90, "url": "https://github.com/alice"},
-            {"site": "twitter", "status": "free", "confidence": 70, "ml_confidence": 10, "url": "https://x.com/alice"},
+            {
+                "site": "github",
+                "status": "claimed",
+                "confidence": 95,
+                "ml_confidence": 90,
+                "url": "https://github.com/alice",
+            },
+            {
+                "site": "twitter",
+                "status": "free",
+                "confidence": 70,
+                "ml_confidence": 10,
+                "url": "https://x.com/alice",
+            },
         ],
     )
     r = client.get("/api/history", headers=_hdr(admin_token))
@@ -90,7 +102,15 @@ def test_history_get_returns_full_results(client: TestClient, admin_token: str) 
     scan_id = _seed_scan(
         _MEMBER,
         "bob",
-        [{"site": "github", "status": "claimed", "confidence": 95, "ml_confidence": 90, "url": "https://github.com/bob"}],
+        [
+            {
+                "site": "github",
+                "status": "claimed",
+                "confidence": 95,
+                "ml_confidence": 90,
+                "url": "https://github.com/bob",
+            }
+        ],
     )
     r = client.get(f"/api/history/{scan_id}", headers=_hdr(admin_token))
     assert r.status_code == 200
@@ -107,15 +127,33 @@ def test_history_diff_detects_new_claim(client: TestClient, admin_token: str) ->
         "carol",
         [
             {"site": "github", "status": "free", "confidence": 70, "ml_confidence": 5, "url": ""},
-            {"site": "reddit", "status": "claimed", "confidence": 90, "ml_confidence": 80, "url": "https://reddit.com/u/carol"},
+            {
+                "site": "reddit",
+                "status": "claimed",
+                "confidence": 90,
+                "ml_confidence": 80,
+                "url": "https://reddit.com/u/carol",
+            },
         ],
     )
     b = _seed_scan(
         _MEMBER,
         "carol",
         [
-            {"site": "github", "status": "claimed", "confidence": 95, "ml_confidence": 88, "url": "https://github.com/carol"},
-            {"site": "reddit", "status": "claimed", "confidence": 92, "ml_confidence": 85, "url": "https://reddit.com/u/carol"},
+            {
+                "site": "github",
+                "status": "claimed",
+                "confidence": 95,
+                "ml_confidence": 88,
+                "url": "https://github.com/carol",
+            },
+            {
+                "site": "reddit",
+                "status": "claimed",
+                "confidence": 92,
+                "ml_confidence": 85,
+                "url": "https://reddit.com/u/carol",
+            },
         ],
     )
     r = client.get(f"/api/history/diff/{a}/{b}", headers=_hdr(admin_token))
@@ -166,7 +204,15 @@ def test_history_pruning_keeps_only_max(
             started_at=1_700_000_000 + i,
             finished_at=1_700_000_001 + i,
             site_count=1,
-            results=[{"site": "github", "status": "claimed", "confidence": 90, "ml_confidence": 80, "url": ""}],
+            results=[
+                {
+                    "site": "github",
+                    "status": "claimed",
+                    "confidence": 90,
+                    "ml_confidence": 80,
+                    "url": "",
+                }
+            ],
         )
     r = client.get("/api/history?username=frank", headers=_hdr(admin_token))
     body = r.json()
@@ -185,9 +231,7 @@ def test_history_delete(client: TestClient, admin_token: str) -> None:
     assert r2.status_code == 404
 
 
-def test_history_get_other_users_scan_returns_404(
-    client: TestClient, admin_token: str
-) -> None:
+def test_history_get_other_users_scan_returns_404(client: TestClient, admin_token: str) -> None:
     scan_id = _seed_scan(
         "someoneelse",
         "alice",

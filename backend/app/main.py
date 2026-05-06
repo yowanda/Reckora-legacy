@@ -1,10 +1,12 @@
 """FastAPI entrypoint."""
+
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -797,8 +799,11 @@ async def history_diff(
     return diff
 
 
-_static_dir = settings.static_dir
-if _static_dir and _static_dir.exists():
+_maybe_static_dir = settings.static_dir
+if _maybe_static_dir and _maybe_static_dir.exists():
+    # Re-bind to a non-Optional name so the closure below type-checks
+    # without per-call asserts.
+    _static_dir: Path = _maybe_static_dir
     _index_html = _static_dir / "index.html"
 
     app.mount(

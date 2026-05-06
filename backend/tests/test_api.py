@@ -1,4 +1,5 @@
 """HTTP-level smoke tests for the public + auth-gated endpoints."""
+
 from __future__ import annotations
 
 import os

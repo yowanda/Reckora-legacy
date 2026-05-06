@@ -4,6 +4,7 @@ No third-party crypto dependencies — uses stdlib `hashlib.pbkdf2_hmac` for pas
 and `hmac` for signing session cookies. Sessions are stateless: the cookie payload
 itself carries `{username, role, exp}` and is verified via HMAC-SHA256.
 """
+
 from __future__ import annotations
 
 import base64
@@ -62,7 +63,7 @@ def verify_password(password: str, stored: str) -> bool:
         algo, iters_s, salt_b64, dk_b64 = stored.split("$", 3)
         if not algo.startswith("pbkdf2_"):
             return False
-        algo_name = algo[len("pbkdf2_"):]
+        algo_name = algo[len("pbkdf2_") :]
         iters = int(iters_s)
         salt = base64.b64decode(salt_b64)
         expected = base64.b64decode(dk_b64)
@@ -197,7 +198,9 @@ def list_members() -> list[Member]:
         rows = conn.execute(
             "SELECT username, role, created_at FROM members ORDER BY created_at ASC"
         ).fetchall()
-    return [Member(username=r["username"], role=r["role"], created_at=r["created_at"]) for r in rows]
+    return [
+        Member(username=r["username"], role=r["role"], created_at=r["created_at"]) for r in rows
+    ]
 
 
 def get_member(username: str) -> Member | None:
@@ -242,9 +245,7 @@ def create_member(username: str, password: str, role: str) -> Member:
 
 def delete_member(username: str) -> bool:
     with db_connection() as conn:
-        cur = conn.execute(
-            "DELETE FROM members WHERE username = ? COLLATE NOCASE", (username,)
-        )
+        cur = conn.execute("DELETE FROM members WHERE username = ? COLLATE NOCASE", (username,))
         return cur.rowcount > 0
 
 
@@ -269,8 +270,7 @@ def update_member(
     args.append(username)
     with db_connection() as conn:
         cur = conn.execute(
-            f"UPDATE members SET {', '.join(sets)} "
-            f"WHERE username = ? COLLATE NOCASE",
+            f"UPDATE members SET {', '.join(sets)} WHERE username = ? COLLATE NOCASE",
             args,
         )
         if cur.rowcount == 0:
@@ -280,9 +280,7 @@ def update_member(
 
 def count_admins() -> int:
     with db_connection() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM members WHERE role = 'admin'"
-        ).fetchone()
+        row = conn.execute("SELECT COUNT(*) AS n FROM members WHERE role = 'admin'").fetchone()
     return int(row["n"])
 
 

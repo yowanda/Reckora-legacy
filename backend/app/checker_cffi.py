@@ -28,10 +28,12 @@ Design choices:
 * The session is shared across one scan via ``CffiRescue`` so we pay
   the libcurl init cost once.
 """
+
 from __future__ import annotations
 
 import contextlib
 import time
+from typing import Any, cast
 
 from .checker import (
     _BLOCK_FINGERPRINTS,
@@ -56,7 +58,13 @@ class CffiRescue:
     """
 
     def __init__(self) -> None:
-        self._session = None
+        # The session is typed Any because curl_cffi.requests.AsyncSession's
+        # ``impersonate`` argument is a ``Literal[...]`` of strings, but the
+        # value is sourced from a runtime-mutable ``settings.cffi_impersonate``
+        # config knob. Pinning the literal would force every operator to keep
+        # the cffi version's literal list in sync with their config; keeping
+        # the type loose at the boundary is the right tradeoff.
+        self._session: Any = None
         self._session_unavailable = False
 
     async def __aenter__(self) -> CffiRescue:
@@ -83,8 +91,12 @@ class CffiRescue:
             self._session_unavailable = True
             return None
         try:
+            # AsyncSession.impersonate is typed as a giant Literal[...] of
+            # supported browser fingerprints. The value comes from a
+            # runtime-mutable settings knob, so erase to Any at the
+            # boundary rather than re-export curl-cffi's literal here.
             self._session = AsyncSession(
-                impersonate=settings.cffi_impersonate,
+                impersonate=cast(Any, settings.cffi_impersonate),
                 timeout=settings.cffi_timeout,
             )
         except Exception:
@@ -164,11 +176,7 @@ class CffiRescue:
         # extracts; the body we just got from curl-cffi is the highest-trust
         # body we'll have for these sites.
         extracted: dict[str, str] | None = None
-        if (
-            status is Status.CLAIMED
-            and confidence >= settings.extract_min_confidence
-            and body
-        ):
+        if status is Status.CLAIMED and confidence >= settings.extract_min_confidence and body:
             from .extractor import extract_identifiers
 
             try:

@@ -5,6 +5,7 @@ Stored in the ``site_overrides`` SQLite table (created in
 on every cache miss; mutations call ``sites.reload_catalog()`` so the
 next probe sees the new state without a server restart.
 """
+
 from __future__ import annotations
 
 import json

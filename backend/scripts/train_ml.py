@@ -41,6 +41,7 @@ Reproducibility
 - Inputs deterministic (synthesized from sites.json) — so re-running
   produces a byte-identical ONNX file modulo skl2onnx version.
 """
+
 from __future__ import annotations
 
 import json
@@ -108,7 +109,9 @@ def build_dataset() -> tuple[np.ndarray, np.ndarray]:
     for _name, raw in raw_sites.items():
         presence = list(raw.get("presenseStrs") or [])
         absence = list(raw.get("absenceStrs") or [])
-        error_strs = list((raw.get("errors") or {}).keys()) if isinstance(raw.get("errors"), dict) else []
+        error_strs = (
+            list((raw.get("errors") or {}).keys()) if isinstance(raw.get("errors"), dict) else []
+        )
         head_only = bool(raw.get("requestHeadOnly"))
         check_type = raw.get("checkType", "status_code")
 
@@ -306,7 +309,9 @@ def main() -> None:
     train_score = model.score(X_train, y_train)
     test_score = model.score(X_test, y_test)
     print(f"accuracy: train={train_score:.3f} test={test_score:.3f}")
-    print(classification_report(y_test, model.predict(X_test), target_names=LABELS, zero_division=0))
+    print(
+        classification_report(y_test, model.predict(X_test), target_names=LABELS, zero_division=0)
+    )
 
     # Export to ONNX. ``zipmap`` False means the probability output is a
     # plain (n, n_classes) tensor — easier to consume from runtime than

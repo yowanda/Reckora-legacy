@@ -4,6 +4,7 @@ These exercise the ONNX runtime end-to-end without re-training. The
 bundled ``app/ml/model.onnx`` ships with the repo so CI runs the same
 weights as production.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -52,9 +53,7 @@ def test_score_separates_claimed_and_free_signals(catalog: object) -> None:
     assert s_claimed > s_free, f"claimed={s_claimed} should outrank free={s_free}"
 
 
-def test_score_disabled_via_setting(
-    catalog: object, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_score_disabled_via_setting(catalog: object, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "enable_ml_confidence", False)
     site = catalog.sites[0]  # type: ignore[attr-defined]
     out = ml.score(site, http_status=200, body="x", elapsed_ms=50)

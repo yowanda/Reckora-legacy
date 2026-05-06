@@ -1,4 +1,5 @@
 """Phase 3 extractor unit tests."""
+
 from __future__ import annotations
 
 from app.extractor import extract_identifiers, find_secondary_usernames
@@ -94,8 +95,8 @@ def test_socid_extractor_github_real_pattern_matches() -> None:
     body = (
         '<link rel="dns-prefetch" href="https://github.githubassets.com/">\n'
         '<button data-hydro-click="{&quot;event_type&quot;:&quot;analytics.event'
-        '&quot;,&quot;payload&quot;:{&quot;profile_user_id&quot;:1024025,&quot;'
-        'profile_user_login&quot;:&quot;torvalds&quot;,&quot;originating_url'
+        "&quot;,&quot;payload&quot;:{&quot;profile_user_id&quot;:1024025,&quot;"
+        "profile_user_login&quot;:&quot;torvalds&quot;,&quot;originating_url"
         '&quot;:&quot;https://github.com/torvalds&quot;}}">x</button>'
     )
     out = extract_identifiers(body)

@@ -20,6 +20,7 @@ Filtering rules:
 Usage:
     python scripts/build_sites.py <path/to/maigret/data.json> [out.json]
 """
+
 from __future__ import annotations
 
 import copy
@@ -91,7 +92,9 @@ def _substitute(template: str, vars_: dict[str, str]) -> str:
     return out
 
 
-def _resolve_site(name: str, site: dict[str, Any], engines: dict[str, Any]) -> dict[str, Any] | None:
+def _resolve_site(
+    name: str, site: dict[str, Any], engines: dict[str, Any]
+) -> dict[str, Any] | None:
     if site.get("disabled"):
         return None
     engine_name = site.get("engine")

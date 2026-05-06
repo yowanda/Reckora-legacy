@@ -1,4 +1,5 @@
 """Tiny TTL cache used to short-circuit repeated searches."""
+
 from __future__ import annotations
 
 import time

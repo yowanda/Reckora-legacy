@@ -29,6 +29,7 @@ Phase 1 additions on top of the maigret-equivalent classifier:
   retries, bursty packet loss inflates the ``ERROR`` rate and erases
   recall on long scans.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -541,10 +542,7 @@ async def check_site(
         # Phase 2.2: rescue with curl-cffi (Chrome TLS impersonation).
         # We only call rescue on real BLOCKED, never on the 403-ignored
         # case (those sites *expect* 403 for missing accounts).
-        if (
-            cffi_rescue is not None
-            and "status-403-ignored" not in blocked_signals
-        ):
+        if cffi_rescue is not None and "status-403-ignored" not in blocked_signals:
             rescued = await cffi_rescue.rescue(site, username)
             if rescued is not None and rescued.status is not Status.BLOCKED:
                 # Bring across the original elapsed ms so latency is the
@@ -617,11 +615,7 @@ async def check_site(
             ml = primary.ml_confidence
             rule = primary.confidence
             disagree_threshold = settings.ml_disagree_threshold
-            if (
-                primary.status is Status.CLAIMED
-                and rule >= 70
-                and ml <= rule - disagree_threshold
-            ):
+            if primary.status is Status.CLAIMED and rule >= 70 and ml <= rule - disagree_threshold:
                 primary.signals = [*primary.signals, f"ml-disagree:claimed-{ml}"]
             elif (
                 primary.status is Status.FREE

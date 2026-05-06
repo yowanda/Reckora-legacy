@@ -14,6 +14,7 @@ Override semantics:
 - ``operation = disable`` keeps the site visible but flags it as
   disabled (we drop it from probe sets but list it in /api/admin/sites).
 """
+
 from __future__ import annotations
 
 import json
@@ -108,7 +109,11 @@ def _coerce_site(name: str, raw: dict, *, source: str = "base") -> Site | None:
         headers = tuple(headers_raw.items())
     elif isinstance(headers_raw, list):
         # Some engine merges produce a list of (k, v) pairs; tolerate that.
-        headers = tuple((str(h[0]), str(h[1])) for h in headers_raw if isinstance(h, (list, tuple)) and len(h) == 2)
+        headers = tuple(
+            (str(h[0]), str(h[1]))
+            for h in headers_raw
+            if isinstance(h, (list, tuple)) and len(h) == 2
+        )
     else:
         headers = ()
     errors_raw = raw.get("errors")

@@ -6,6 +6,7 @@ DB / admin choices. To avoid each test module fighting that singleton
 (and causing 401s when admin creds drift between modules) we set a
 single shared bootstrap here.
 """
+
 from __future__ import annotations
 
 import os

@@ -36,3 +36,12 @@ backend/var/
 *.db
 *.sqlite
 *.sqlite3
+
+# Playwright e2e artifacts
+frontend/playwright-report/
+frontend/test-results/
+frontend/blob-report/
+frontend/playwright/.cache/
+
+# pre-commit
+.pre-commit-cache/

@@ -27,6 +27,7 @@ Design notes:
   module degrades gracefully: ``score()`` returns ``None`` and the
   runtime treats every result as "ML unavailable".
 """
+
 from __future__ import annotations
 
 import logging
@@ -35,6 +36,7 @@ import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .config import settings
 from .sites import Site
@@ -45,14 +47,14 @@ log = logging.getLogger(__name__)
 # encodes the column ordering, so adding/removing/reordering features
 # requires re-training.
 FEATURE_NAMES: tuple[str, ...] = (
-    "http_status_2xx",     # 1 if 200<=status<300 else 0
-    "http_status_4xx",     # 1 if 400<=status<500 else 0
-    "log_body_length",     # log10(1 + len(body))
+    "http_status_2xx",  # 1 if 200<=status<300 else 0
+    "http_status_4xx",  # 1 if 400<=status<500 else 0
+    "log_body_length",  # log10(1 + len(body))
     "presence_match_count",
     "absence_match_count",
     "error_match_count",
-    "log_elapsed_ms",      # log10(1 + elapsed_ms)
-    "head_only_site",      # 1 if site is HEAD-only else 0
+    "log_elapsed_ms",  # log10(1 + elapsed_ms)
+    "head_only_site",  # 1 if site is HEAD-only else 0
 )
 
 # Model bundle path (relative to this file). Stored under ``app/ml/`` so
@@ -135,7 +137,10 @@ class _ModelHandle:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._session: object | None = None
+        # onnxruntime ships no type stubs, so we keep the session as Any
+        # rather than dragging in a ``TYPE_CHECKING`` import dance for a
+        # third-party object that has no public class hierarchy.
+        self._session: Any = None
         self._input_name: str = ""
         self._claimed_class_index: int = 0
         self._loaded = False
@@ -206,7 +211,7 @@ class _ModelHandle:
             x = np.array([features.to_list()], dtype=np.float32)
             with self._lock:
                 # ``run(None, ...)`` returns all outputs in declaration order.
-                outputs = self._session.run(None, {self._input_name: x})  # type: ignore[union-attr]
+                outputs = self._session.run(None, {self._input_name: x})
             # The probability output is a list-of-dicts (one dict per
             # input row) in skl2onnx's default format. Normalise to a
             # float in [0, 1] for the CLAIMED class.
