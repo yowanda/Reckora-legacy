@@ -109,7 +109,7 @@ export function AdminPanel() {
       <header>
         <h2 className="text-xl font-semibold tracking-tight">Member management</h2>
         <p className="mt-1 text-sm text-zinc-400">
-          Add, remove, and reset passwords for cacadoxx members. Members can search; only admins
+          Add, remove, and reset passwords for Reckora members. Members can search; only admins
           can manage other members.
         </p>
       </header>

@@ -7,10 +7,10 @@
   body {
     @apply bg-bg text-zinc-100 font-sans antialiased;
     background-image:
-      radial-gradient(1200px 600px at 80% -10%, rgba(124,92,255,0.15), transparent 60%),
+      radial-gradient(1200px 600px at 80% -10%, rgba(34,211,238,0.16), transparent 60%),
       radial-gradient(800px 500px at -10% 110%, rgba(61,220,132,0.08), transparent 55%);
   }
-  ::selection { background: rgba(124,92,255,0.4); }
+  ::selection { background: rgba(34,211,238,0.4); }
 }
 
 @layer components {

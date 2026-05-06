@@ -18,7 +18,7 @@ export function Header({ view, onChangeView }: Props) {
           className="flex items-center gap-2 text-lg font-semibold tracking-tight"
         >
           <Logo className="h-7 w-7" />
-          <span>cacadoxx</span>
+          <span>reckora</span>
           <span className="ml-1 rounded-full bg-accent/20 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-accent">
             beta
           </span>
@@ -45,7 +45,7 @@ export function Header({ view, onChangeView }: Props) {
             </button>
           )}
           <a
-            href="https://github.com/yowanda/Cacadoxx"
+            href="https://github.com/yowanda/Reckora"
             target="_blank"
             rel="noreferrer"
             className="btn-ghost"
@@ -83,12 +83,17 @@ function Logo({ className }: { className?: string }) {
     <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
       <defs>
         <linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#7c5cff" />
+          <stop offset="0%" stopColor="#22d3ee" />
           <stop offset="100%" stopColor="#3ddc84" />
         </linearGradient>
       </defs>
-      <circle cx="26" cy="26" r="14" fill="none" stroke="url(#logo-g)" strokeWidth="5" />
-      <line x1="36" y1="36" x2="52" y2="52" stroke="url(#logo-g)" strokeWidth="6" strokeLinecap="round" />
+      <circle cx="32" cy="32" r="22" fill="none" stroke="url(#logo-g)" strokeWidth="3" />
+      <circle cx="32" cy="32" r="12" fill="none" stroke="url(#logo-g)" strokeWidth="2.4" opacity="0.8" />
+      <circle cx="32" cy="32" r="2.8" fill="url(#logo-g)" />
+      <line x1="32" y1="4"  x2="32" y2="14" stroke="url(#logo-g)" strokeWidth="3" strokeLinecap="round" />
+      <line x1="32" y1="50" x2="32" y2="60" stroke="url(#logo-g)" strokeWidth="3" strokeLinecap="round" />
+      <line x1="4"  y1="32" x2="14" y2="32" stroke="url(#logo-g)" strokeWidth="3" strokeLinecap="round" />
+      <line x1="50" y1="32" x2="60" y2="32" stroke="url(#logo-g)" strokeWidth="3" strokeLinecap="round" />
     </svg>
   )
 }

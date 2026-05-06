@@ -33,10 +33,10 @@ export function LoginPage() {
       <main className="mx-auto flex max-w-md flex-col items-center px-4 py-16 sm:py-24">
         <div className="mb-6 flex items-center gap-2 text-2xl font-semibold tracking-tight">
           <Logo className="h-8 w-8" />
-          <span>cacadoxx</span>
+          <span>reckora</span>
         </div>
         <p className="mb-8 text-center text-sm text-zinc-400">
-          Members-only username footprint scanner. Sign in to continue.
+          Members-only OSINT username recon. Sign in to continue.
         </p>
         <form onSubmit={onSubmit} className="card w-full space-y-4 px-5 py-6">
           <label className="block">
@@ -88,12 +88,17 @@ function Logo({ className }: { className?: string }) {
     <svg viewBox="0 0 64 64" className={className} aria-hidden="true">
       <defs>
         <linearGradient id="logo-login" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#7c5cff" />
+          <stop offset="0%" stopColor="#22d3ee" />
           <stop offset="100%" stopColor="#3ddc84" />
         </linearGradient>
       </defs>
-      <circle cx="26" cy="26" r="14" fill="none" stroke="url(#logo-login)" strokeWidth="5" />
-      <line x1="36" y1="36" x2="52" y2="52" stroke="url(#logo-login)" strokeWidth="6" strokeLinecap="round" />
+      <circle cx="32" cy="32" r="22" fill="none" stroke="url(#logo-login)" strokeWidth="3" />
+      <circle cx="32" cy="32" r="12" fill="none" stroke="url(#logo-login)" strokeWidth="2.4" opacity="0.8" />
+      <circle cx="32" cy="32" r="2.8" fill="url(#logo-login)" />
+      <line x1="32" y1="4"  x2="32" y2="14" stroke="url(#logo-login)" strokeWidth="3" strokeLinecap="round" />
+      <line x1="32" y1="50" x2="32" y2="60" stroke="url(#logo-login)" strokeWidth="3" strokeLinecap="round" />
+      <line x1="4"  y1="32" x2="14" y2="32" stroke="url(#logo-login)" strokeWidth="3" strokeLinecap="round" />
+      <line x1="50" y1="32" x2="60" y2="32" stroke="url(#logo-login)" strokeWidth="3" strokeLinecap="round" />
     </svg>
   )
 }

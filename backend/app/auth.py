@@ -26,7 +26,7 @@ PBKDF2_ITERATIONS = 200_000
 PBKDF2_DKLEN = 32
 PBKDF2_HASH = "sha256"
 SALT_BYTES = 16
-SESSION_COOKIE = "cacadoxx_session"
+SESSION_COOKIE = "reckora_session"
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60  # 7 days
 USERNAME_RE = (
     # 3-32 chars, letters/digits/_-. and must start with a letter or digit
@@ -123,7 +123,7 @@ def init_db() -> None:
 
 def _ensure_session_secret() -> bytes:
     """Return the persistent HMAC secret used to sign session cookies."""
-    env_secret = os.getenv("CACADOXX_SESSION_SECRET")
+    env_secret = os.getenv("RECKORA_SESSION_SECRET")
     if env_secret:
         return env_secret.encode("utf-8")
     with db_connection() as conn:
@@ -140,8 +140,8 @@ def _ensure_session_secret() -> bytes:
 
 def seed_admin_from_env() -> None:
     """Create the seed admin from env if it doesn't already exist."""
-    username = os.getenv("CACADOXX_ADMIN_USERNAME", "").strip()
-    password = os.getenv("CACADOXX_ADMIN_PASSWORD", "").strip()
+    username = os.getenv("RECKORA_ADMIN_USERNAME", "").strip()
+    password = os.getenv("RECKORA_ADMIN_PASSWORD", "").strip()
     if not username or not password:
         return
     with db_connection() as conn:

@@ -5,10 +5,10 @@
 # API and the SPA on one origin. HF Spaces sets PORT=7860 at runtime;
 # the entrypoint honours it via ${PORT:-8080}.
 #
-# Build context = repo root. Locally: `docker build -t cacadoxx .`
+# Build context = repo root. Locally: `docker build -t reckora .`
 # Then: `docker run --rm -p 7860:7860 \
-#         -e CACADOXX_ADMIN_USERNAME=admin \
-#         -e CACADOXX_ADMIN_PASSWORD=changeme cacadoxx`
+#         -e RECKORA_ADMIN_USERNAME=admin \
+#         -e RECKORA_ADMIN_PASSWORD=changeme reckora`
 #
 # Live deployment: https://yesmyyt-cacadoxx.hf.space
 
@@ -42,7 +42,7 @@ COPY --from=frontend /src/dist ./app/static
 
 ENV PYTHONUNBUFFERED=1 \
     PORT=7860 \
-    CACADOXX_DB_PATH=/data/cacadoxx.db
+    RECKORA_DB_PATH=/data/reckora.db
 
 # /data is writable on Hugging Face Spaces persistent volumes; falls back
 # to /tmp at runtime if /data isn't writable.

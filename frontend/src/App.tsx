@@ -112,7 +112,7 @@ function SearchView() {
     <>
       <section className="mx-auto max-w-3xl text-center">
         <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
-          Trace any{' '}
+          Recon any{' '}
           <span className="bg-gradient-to-r from-accent via-emerald-300 to-ok bg-clip-text text-transparent">
             username
           </span>
@@ -202,7 +202,7 @@ function Footer({ onLogout }: { onLogout(): void }) {
   return (
     <footer className="mt-20 border-t border-bg-border pt-6 text-center text-xs text-zinc-500">
       <p>
-        cacadoxx · credit:{' '}
+        reckora · credit:{' '}
         <span className="text-zinc-300">cacapaspas</span> · for legitimate self-research and
         security work. Site database derived from{' '}
         <a

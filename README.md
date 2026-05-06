@@ -1,12 +1,12 @@
-# Cacadoxx
+# Reckora
 
-> Trace any username across the open web. Concurrent OSINT lookup over 500+
-> public sites with a streaming API and a modern UI — gated behind a
+> Recon any username across the open web. Concurrent OSINT lookup over
+> 500+ public sites with a streaming API and a modern UI — gated behind a
 > members-only login that admins fully control.
 
 🌐 **Live demo**: <https://yesmyyt-cacadoxx.hf.space>
 
-Cacadoxx is a small, modern web app inspired by
+Reckora is a small, modern web app inspired by
 [maigret](https://github.com/soxoj/maigret). It checks whether a given
 username has a public profile on hundreds of sites and streams the results
 back to your browser as they arrive.
@@ -30,9 +30,9 @@ data/      Curated site database derived from upstream maigret (MIT)
 
 ## Auth model (TL;DR)
 
-- Cacadoxx is **members-only**. There is no public sign-up.
+- Reckora is **members-only**. There is no public sign-up.
 - A seed admin is created from environment variables on first boot
-  (`CACADOXX_ADMIN_USERNAME` / `CACADOXX_ADMIN_PASSWORD`).
+  (`RECKORA_ADMIN_USERNAME` / `RECKORA_ADMIN_PASSWORD`).
 - **Admins** can log in, run searches, and manage other members
   (add / delete / change role / reset password).
 - **Members** can log in and run searches — that's it. Members **cannot**
@@ -44,8 +44,8 @@ data/      Curated site database derived from upstream maigret (MIT)
 ## Quick start
 
 ```bash
-git clone https://github.com/yowanda/Cacadoxx
-cd Cacadoxx
+git clone https://github.com/yowanda/Reckora
+cd Reckora
 ```
 
 Backend:
@@ -55,8 +55,8 @@ cd backend
 uv sync                                 # or: pip install -e ".[dev]"
 
 # Required for first boot — seeds the admin account.
-export CACADOXX_ADMIN_USERNAME=adminganteng
-export CACADOXX_ADMIN_PASSWORD=adminadmin
+export RECKORA_ADMIN_USERNAME=adminganteng
+export RECKORA_ADMIN_PASSWORD=adminadmin
 
 uv run uvicorn app.main:app --reload    # http://localhost:8000
 ```
@@ -89,8 +89,8 @@ cp -r dist/* ../backend/app/static/
 
 # 3) Run the backend — it auto-mounts /assets and serves /, /login, etc.
 cd ../backend
-CACADOXX_ADMIN_USERNAME=adminganteng \
-CACADOXX_ADMIN_PASSWORD=adminadmin \
+RECKORA_ADMIN_USERNAME=adminganteng \
+RECKORA_ADMIN_PASSWORD=adminadmin \
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -111,14 +111,14 @@ can use **Docker SDK** with no extra config.
    - **Space SDK**: **Docker** → blank template.
    - **Visibility**: public (the auth gate is in-app).
 3. Add Space secrets under *Settings → Variables and secrets*:
-   - `CACADOXX_ADMIN_USERNAME`
-   - `CACADOXX_ADMIN_PASSWORD`
-   - (optional) `CACADOXX_SESSION_SECRET` — any 32+ char random string.
+   - `RECKORA_ADMIN_USERNAME`
+   - `RECKORA_ADMIN_PASSWORD`
+   - (optional) `RECKORA_SESSION_SECRET` — any 32+ char random string.
 4. Mirror this repo's contents into the Space's git
    (the Space build picks up the top-level `Dockerfile` automatically):
    ```bash
    git clone https://huggingface.co/spaces/<user>/<space-name> hf-space
-   cp -r Cacadoxx/* hf-space/
+   cp -r Reckora/* hf-space/
    cd hf-space && git add -A && git commit -m "deploy" && git push
    ```
 5. The Space builds the image and serves the app at
@@ -133,8 +133,8 @@ requires a payment method on file even for the small free allowance.
 
 ```bash
 fly auth login
-fly secrets set CACADOXX_ADMIN_USERNAME=adminganteng \
-                CACADOXX_ADMIN_PASSWORD=<strong-password>
+fly secrets set RECKORA_ADMIN_USERNAME=adminganteng \
+                RECKORA_ADMIN_PASSWORD=<strong-password>
 fly deploy
 ```
 
@@ -209,6 +209,26 @@ single-origin server. All assertions below passed:
    currently-signed-in admin returns `400 cannot delete the
    currently signed-in admin`; demoting the only admin returns
    `400 cannot demote the last admin`.
+
+## Migrating from `Cacadoxx` (env vars)
+
+The `CACADOXX_*` environment-variable prefix has been renamed to
+`RECKORA_*`. Operators upgrading an existing deployment must rename:
+
+| Old                          | New                          |
+| ---------------------------- | ---------------------------- |
+| `CACADOXX_ADMIN_USERNAME`    | `RECKORA_ADMIN_USERNAME`     |
+| `CACADOXX_ADMIN_PASSWORD`    | `RECKORA_ADMIN_PASSWORD`     |
+| `CACADOXX_SESSION_SECRET`    | `RECKORA_SESSION_SECRET`     |
+| `CACADOXX_DB_PATH`           | `RECKORA_DB_PATH`            |
+| `CACADOXX_CORS_ORIGINS`      | `RECKORA_CORS_ORIGINS`       |
+| `CACADOXX_LOGIN_RATE_LIMIT`  | `RECKORA_LOGIN_RATE_LIMIT`   |
+| `CACADOXX_SEARCH_RATE_LIMIT` | `RECKORA_SEARCH_RATE_LIMIT`  |
+
+Existing SQLite data is unaffected if you point `RECKORA_DB_PATH` at the
+old `cacadoxx.db` file. The session cookie name has changed from
+`cacadoxx_session` to `reckora_session`, so members will need to sign in
+again after the upgrade.
 
 ## Credits
 

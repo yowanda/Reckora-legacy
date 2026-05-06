@@ -10,14 +10,14 @@ from fastapi.testclient import TestClient
 
 # Point the DB and admin seed at a clean location BEFORE importing the app, so
 # auth.init_db() / seed_admin_from_env() pick up these values on FastAPI startup.
-TEST_DB = Path("/tmp/cacadoxx-test.db")
+TEST_DB = Path("/tmp/reckora-test.db")
 if TEST_DB.exists():
     TEST_DB.unlink()
-os.environ["CACADOXX_DB_PATH"] = str(TEST_DB)
-os.environ["CACADOXX_ADMIN_USERNAME"] = "rootadmin"
-os.environ["CACADOXX_ADMIN_PASSWORD"] = "rootpass1"
-os.environ["CACADOXX_LOGIN_RATE_LIMIT"] = "1000/minute"
-os.environ["CACADOXX_SEARCH_RATE_LIMIT"] = "1000/minute"
+os.environ["RECKORA_DB_PATH"] = str(TEST_DB)
+os.environ["RECKORA_ADMIN_USERNAME"] = "rootadmin"
+os.environ["RECKORA_ADMIN_PASSWORD"] = "rootpass1"
+os.environ["RECKORA_LOGIN_RATE_LIMIT"] = "1000/minute"
+os.environ["RECKORA_SEARCH_RATE_LIMIT"] = "1000/minute"
 
 from app.main import app  # noqa: E402
 
@@ -192,4 +192,4 @@ def test_logout_clears_cookie(client: TestClient, admin_token: str) -> None:
     r = client.post("/api/auth/logout", headers=_hdr(admin_token))
     assert r.status_code == 200
     # the cookie should be set with an empty value
-    assert "cacadoxx_session" in r.headers.get("set-cookie", "")
+    assert "reckora_session" in r.headers.get("set-cookie", "")

@@ -29,13 +29,13 @@ from .checker import is_valid_username, stream_checks
 from .config import settings
 from .sites import SiteCatalog, load_catalog
 
-logger = logging.getLogger("cacadoxx")
+logger = logging.getLogger("reckora")
 
 limiter = Limiter(key_func=get_remote_address, default_limits=[])
 cache = TTLCache(max_entries=settings.cache_max_entries, ttl_seconds=settings.cache_ttl_seconds)
 
 app = FastAPI(
-    title="Cacadoxx",
+    title="Reckora",
     version=__version__,
     description="Username footprint scanner — modern OSINT lookup.",
     default_response_class=ORJSONResponse,
@@ -93,9 +93,9 @@ class SearchRequest(BaseModel):
 
 async def current_member(
     request: Request,
-    cacadoxx_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+    reckora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> Member:
-    token = cacadoxx_session
+    token = reckora_session
     if token is None:
         # fallback to Authorization: Bearer <token> for non-browser clients (curl/CI)
         auth = request.headers.get("authorization", "")
@@ -388,7 +388,7 @@ else:
     @app.get("/")
     async def root() -> dict[str, Any]:
         return {
-            "name": "cacadoxx",
+            "name": "reckora",
             "version": __version__,
             "docs": "/docs",
             "endpoints": ["/api/health", "/api/sites", "/api/search"],

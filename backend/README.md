@@ -1,4 +1,4 @@
-# cacadoxx-backend
+# reckora-backend
 
 FastAPI service that gates a username footprint scanner behind a
 members-only login. Scans 500+ public sites and streams results back over
@@ -10,14 +10,14 @@ Server-Sent Events.
 uv sync
 
 # REQUIRED on first boot — seeds the admin account in SQLite.
-export CACADOXX_ADMIN_USERNAME=adminganteng
-export CACADOXX_ADMIN_PASSWORD=adminadmin
+export RECKORA_ADMIN_USERNAME=adminganteng
+export RECKORA_ADMIN_PASSWORD=adminadmin
 
 uv run uvicorn app.main:app --reload
 ```
 
 Then `curl http://localhost:8000/api/health`. The first time the server
-boots it creates `var/cacadoxx.db` (SQLite) and seeds the admin from the
+boots it creates `var/reckora.db` (SQLite) and seeds the admin from the
 environment variables above. Subsequent boots reuse the existing DB.
 
 ## Endpoints
@@ -25,7 +25,7 @@ environment variables above. Subsequent boots reuse the existing DB.
 Public:
 
 - `GET  /api/health` — liveness + version + site count
-- `POST /api/auth/login` — `{username, password}` → sets `cacadoxx_session` cookie
+- `POST /api/auth/login` — `{username, password}` → sets `reckora_session` cookie
 - `POST /api/auth/logout` — clears the session cookie
 
 Member+:
@@ -48,7 +48,7 @@ Admin only:
   `HttpOnly`, `SameSite=lax`, `Secure`. Non-browser clients can use
   `Authorization: Bearer <token>` instead — login also returns the token
   in the JSON body for that purpose.
-- **Storage:** SQLite at `CACADOXX_DB_PATH` (default `backend/var/cacadoxx.db`).
+- **Storage:** SQLite at `RECKORA_DB_PATH` (default `backend/var/reckora.db`).
 - **Seed admin:** never overwrites an existing user; only inserts on first
   boot when the DB is empty for that username.
 

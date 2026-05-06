@@ -48,7 +48,7 @@ export function SearchBar({ onSubmit, isRunning, onStop, initial = '' }: Props) 
         ) : (
           <button type="submit" disabled={!value.trim()} className="btn-primary h-12 px-6">
             <SearchIcon />
-            Scan
+            Recon
           </button>
         )}
       </div>

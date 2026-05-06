@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-const KEY = 'cacadoxx.disclaimer.v1'
+const KEY = 'reckora.disclaimer.v1'
 
 export function Disclaimer() {
   const [open, setOpen] = useState(() =>
@@ -14,7 +14,7 @@ export function Disclaimer() {
         <h2 className="text-lg font-semibold">Use responsibly</h2>
         <div className="mt-3 space-y-2 text-sm leading-relaxed text-zinc-300">
           <p>
-            Cacadoxx queries publicly reachable URLs to check whether a username has a profile on
+            Reckora queries publicly reachable URLs to check whether a username has a profile on
             various sites. It does not bypass authentication, scrape private data, or attempt
             credential discovery.
           </p>
@@ -24,7 +24,7 @@ export function Disclaimer() {
           </p>
           <p className="text-zinc-500">
             By continuing you agree to these terms. Source code is{' '}
-            <a className="text-accent hover:underline" href="https://github.com/yowanda/Cacadoxx" target="_blank" rel="noreferrer">on GitHub</a>.
+            <a className="text-accent hover:underline" href="https://github.com/yowanda/Reckora" target="_blank" rel="noreferrer">on GitHub</a>.
           </p>
         </div>
         <div className="mt-5 flex justify-end gap-2">

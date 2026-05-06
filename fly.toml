@@ -1,11 +1,11 @@
-app = "cacadoxx"
+app = "reckora"
 primary_region = "sin"
 
 [build]
   dockerfile = "backend/Dockerfile"
 
 [env]
-  CACADOXX_CORS_ORIGINS = "*"
+  RECKORA_CORS_ORIGINS = "*"
 
 [http_service]
   internal_port = 8080

@@ -16,8 +16,8 @@ export default {
           border: '#23232a',
         },
         accent: {
-          DEFAULT: '#7c5cff',
-          soft: '#5d44d6',
+          DEFAULT: '#22d3ee',
+          soft: '#0891b2',
         },
         ok: '#3ddc84',
         warn: '#f6b73c',

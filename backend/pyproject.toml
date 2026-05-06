@@ -1,7 +1,7 @@
 [project]
-name = "cacadoxx-backend"
+name = "reckora-backend"
 version = "0.1.0"
-description = "Cacadoxx username footprint scanner — backend"
+description = "Reckora username footprint scanner — backend"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
