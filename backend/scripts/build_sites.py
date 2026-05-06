@@ -46,6 +46,18 @@ ALLOWED_KEYS = {
     "errorMsg",
     "engine",
     "ignore403",
+    "prewarm",
+}
+
+# Phase 2: engines whose sites typically gate behind a session cookie set
+# on the home page. Probing the username URL cold often returns 403/302/CF
+# challenge; visiting urlMain first primes the cookie jar so the probe
+# succeeds. Set conservatively — over-flagging adds latency.
+PREWARM_ENGINES = {
+    "XenForo",
+    "vBulletin",
+    "uCoz",
+    "Discourse",
 }
 
 
@@ -102,6 +114,8 @@ def _resolve_site(name: str, site: dict[str, Any], engines: dict[str, Any]) -> d
     site["url"] = url
     cleaned = {k: site[k] for k in ALLOWED_KEYS if k in site}
     cleaned.setdefault("checkType", "status_code")
+    if engine_name in PREWARM_ENGINES and not cleaned.get("prewarm"):
+        cleaned["prewarm"] = True
     return cleaned
 
 

@@ -36,6 +36,12 @@ class Site:
     # purely for telemetry / debugging — runtime classification doesn't
     # branch on it.
     engine: str | None = None
+    # Phase 2: pre-warm cookies before probing. Sites flagged ``prewarm``
+    # get a GET to ``url_main`` first so any session/anti-bot cookies are
+    # in the shared cookie jar before the username probe goes out. Set
+    # automatically by ``build_sites.py`` for engines known to need it
+    # (XenForo, vBulletin, uCoz, plus the high-WAF subset).
+    prewarm: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +109,7 @@ def _coerce_site(name: str, raw: dict) -> Site | None:
         head_only=bool(raw.get("requestHeadOnly")),
         ignore_403=bool(raw.get("ignore403")),
         engine=raw.get("engine"),
+        prewarm=bool(raw.get("prewarm")),
     )
 
 

@@ -67,6 +67,12 @@ class CheckResult:
     confidence: int = 0
     signals: list[str] = field(default_factory=list)
     attempts: int = 1
+    # Phase 2: 2-stage verification.
+    # ``None`` = verify wasn't attempted (low-priority result, or verify
+    # disabled). ``True`` = a second probe with a different UA/Referer
+    # agreed with the primary classification. ``False`` = the second
+    # probe disagreed; primary classification is downgraded to UNKNOWN.
+    verified: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,6 +87,7 @@ class CheckResult:
             "confidence": self.confidence,
             "signals": self.signals,
             "attempts": self.attempts,
+            "verified": self.verified,
         }
 
 
@@ -254,7 +261,151 @@ async def _do_probe(
     return await client.get(url, headers=headers, follow_redirects=True)
 
 
-async def check_site(client: httpx.AsyncClient, site: Site, username: str) -> CheckResult:
+# Phase 2: alternate identity used by the verify probe. Different family
+# (Firefox, not Chrome), different referer, different language. Picking a
+# distinct identity lets us catch sites that key on the first request's
+# fingerprint to decide whether to serve real content.
+_ALT_USER_AGENT = (
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) "
+    "Gecko/20100101 Firefox/122.0 Reckora-Verify/0.2"
+)
+_ALT_REFERERS: tuple[str, ...] = (
+    "https://duckduckgo.com/",
+    "https://www.bing.com/search",
+    "https://search.brave.com/",
+)
+
+
+def _origin(url: str) -> str:
+    """Return ``scheme://host`` portion of a URL for cookie-jar bookkeeping."""
+    try:
+        u = httpx.URL(url)
+        port = f":{u.port}" if u.port and u.port not in (80, 443) else ""
+        return f"{u.scheme}://{u.host}{port}"
+    except (httpx.InvalidURL, ValueError, TypeError):
+        return ""
+
+
+async def _prewarm(
+    client: httpx.AsyncClient,
+    site: Site,
+    headers: dict[str, str],
+    cache: set[str],
+    cache_lock: asyncio.Lock,
+) -> bool:
+    """Hit ``site.url_main`` once per host to seed cookies in the shared
+    jar. Returns True iff a prewarm was actually performed (callers may use
+    this to skip the body-fetch on the username probe if nothing changed).
+    """
+    origin = _origin(site.url_main)
+    if not origin:
+        return False
+    async with cache_lock:
+        if origin in cache:
+            return False
+        cache.add(origin)
+    try:
+        # GET (not HEAD) — many anti-bot middlewares only emit cookies on
+        # full requests. Short timeout: prewarm shouldn't block the probe
+        # for long, and a stale prewarm just degrades to the un-warmed
+        # behaviour we had before.
+        await client.get(
+            site.url_main,
+            headers=headers,
+            follow_redirects=True,
+            timeout=min(settings.request_timeout, 5.0),
+        )
+        return True
+    except (httpx.HTTPError, httpx.InvalidURL):
+        return False
+
+
+def _should_verify(site: Site, primary: CheckResult) -> bool:
+    """Decide whether a borderline CLAIMED is worth re-probing.
+
+    Verification is the most expensive thing in the pipeline (it doubles
+    the request count for the affected site), so we want to spend it only
+    on results that are genuinely ambiguous. Heuristics:
+
+    - Pure status_code CLAIMED with no body signals — these are the most
+      common false-positive source (200-on-everything sites, soft-404).
+    - message-classified CLAIMED with only ``presence-miss`` (no real
+      presence string matched, just the absence of a "not-found" marker).
+    - Anything with confidence < 75.
+    """
+    if primary.status is not Status.CLAIMED:
+        return False
+    if primary.confidence < 75:
+        return True
+    if site.check_type == "status_code":
+        # 2xx-only classifies are inherently weak even at high score.
+        return True
+    return "presence-miss" in primary.signals
+
+
+async def _verify_check(
+    client: httpx.AsyncClient,
+    site: Site,
+    primary: CheckResult,
+) -> CheckResult:
+    """Re-probe ``site`` for ``username`` with a rotated identity and amend
+    ``primary`` in place.
+
+    On agreement, confidence is bumped and ``verified=True``.
+    On disagreement, status is demoted to UNKNOWN and confidence halved.
+    On verify-time error, ``verified`` stays None and a signal is added so
+    the SPA can surface "verify skipped" rather than masking the result.
+    """
+    url = primary.url
+    referer_idx = abs(hash(url)) % len(_ALT_REFERERS)
+    headers = {
+        "User-Agent": _ALT_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": "en-GB,en;q=0.7",
+        "Referer": _ALT_REFERERS[referer_idx],
+    }
+    headers.update(dict(site.headers))
+    method = "HEAD" if (site.head_only and site.check_type == "status_code") else "GET"
+    try:
+        resp = await _do_probe(client, method, url, headers)
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
+        primary.signals = [*primary.signals, f"verify-err:{type(e).__name__}"]
+        return primary
+
+    body = "" if method == "HEAD" else (resp.text or "")
+    # Verify-time block detection.
+    if resp.status_code in (429, 451) or _is_blocked_body(body):
+        primary.signals = [*primary.signals, "verify-blocked"]
+        primary.confidence = max(0, primary.confidence - 10)
+        return primary
+
+    second_status, second_signals = _classify_response(resp, body, site)
+    if second_status is Status.CLAIMED:
+        primary.verified = True
+        primary.signals = [*primary.signals, "verify-agree"]
+        primary.confidence = min(100, primary.confidence + 6)
+    else:
+        primary.verified = False
+        primary.signals = [
+            *primary.signals,
+            f"verify-disagree:{second_status.value}",
+            *(f"v:{s}" for s in second_signals),
+        ]
+        primary.confidence = max(0, primary.confidence // 2)
+        primary.status = Status.UNKNOWN
+    return primary
+
+
+async def check_site(
+    client: httpx.AsyncClient,
+    site: Site,
+    username: str,
+    *,
+    prewarm_cache: set[str] | None = None,
+    prewarm_lock: asyncio.Lock | None = None,
+    verify: bool = True,
+) -> CheckResult:
     url = site.url.replace("{username}", username)
     if not _matches_regex(username, site.regex_check):
         return CheckResult(
@@ -279,6 +430,11 @@ async def check_site(client: httpx.AsyncClient, site: Site, username: str) -> Ch
         "Accept-Language": "en-US,en;q=0.9",
     }
     headers.update(dict(site.headers))
+
+    # Phase 2: per-host cookie prewarm. Only hits each origin once per
+    # scan; subsequent checks share the cookie jar via the AsyncClient.
+    if site.prewarm and prewarm_cache is not None and prewarm_lock is not None:
+        await _prewarm(client, site, headers, prewarm_cache, prewarm_lock)
 
     method = "HEAD" if (site.head_only and site.check_type == "status_code") else "GET"
 
@@ -377,7 +533,7 @@ async def check_site(client: httpx.AsyncClient, site: Site, username: str) -> Ch
         status = Status.UNKNOWN
         signals = [*signals, "site-ignores-403"]
 
-    return CheckResult(
+    primary = CheckResult(
         site=site.name,
         status=status,
         url=url,
@@ -389,6 +545,11 @@ async def check_site(client: httpx.AsyncClient, site: Site, username: str) -> Ch
         signals=signals,
         attempts=attempts,
     )
+    if verify and _should_verify(site, primary):
+        primary = await _verify_check(client, site, primary)
+        # Verify time included so the caller sees the true latency.
+        primary.elapsed_ms = int((time.perf_counter() - started) * 1000)
+    return primary
 
 
 async def stream_checks(
@@ -396,8 +557,14 @@ async def stream_checks(
     username: str,
     *,
     client: httpx.AsyncClient | None = None,
+    verify: bool = True,
 ) -> AsyncIterator[CheckResult]:
-    """Run checks concurrently and yield each result as it arrives."""
+    """Run checks concurrently and yield each result as it arrives.
+
+    ``verify`` toggles the Phase 2 second-stage probe for borderline
+    CLAIMED results (default on; ``False`` for tests / latency-sensitive
+    callers that want raw first-pass classification).
+    """
     owned_client = client is None
     if owned_client:
         # http2=True saves ~1 RTT per host on warm pools; many CMS-hosted
@@ -414,11 +581,23 @@ async def stream_checks(
 
     sem = asyncio.Semaphore(settings.total_concurrency)
     queue: asyncio.Queue[CheckResult | None] = asyncio.Queue()
+    # Phase 2: per-host prewarm bookkeeping. One set per scan so cookies
+    # don't bleed between scans (each scan gets a fresh AsyncClient when
+    # owned_client is True; the cache lives only as long as the iterator).
+    prewarm_cache: set[str] = set()
+    prewarm_lock = asyncio.Lock()
 
     async def worker(site: Site) -> None:
         async with sem:
             try:
-                result = await check_site(client, site, username)
+                result = await check_site(
+                    client,
+                    site,
+                    username,
+                    prewarm_cache=prewarm_cache,
+                    prewarm_lock=prewarm_lock,
+                    verify=verify,
+                )
             except Exception as e:
                 result = CheckResult(
                     site=site.name,

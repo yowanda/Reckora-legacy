@@ -14,6 +14,10 @@ export interface CheckResult {
   confidence?: number
   signals?: string[]
   attempts?: number
+  // Phase 2: 2-stage verify outcome. ``true`` = re-probe with rotated
+  // UA agreed; ``false`` = re-probe disagreed (status was demoted to
+  // UNKNOWN); ``null``/missing = verify wasn't attempted.
+  verified?: boolean | null
 }
 
 export interface SiteSummary {

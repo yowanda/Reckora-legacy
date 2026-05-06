@@ -153,7 +153,9 @@ async def test_head_only_uses_head_method() -> None:
     site = _site(head_only=True)
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        result = await check_site(client, site, "alice")
+        # verify=False keeps the test focussed on the primary probe.
+        # Phase 2's verify pass would otherwise add a second HEAD.
+        result = await check_site(client, site, "alice", verify=False)
     assert seen == ["HEAD"]
     assert result.status is Status.CLAIMED
 
@@ -170,7 +172,7 @@ async def test_smart_retry_recovers_from_503() -> None:
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        result = await check_site(client, _site(), "alice")
+        result = await check_site(client, _site(), "alice", verify=False)
     assert state["attempts"] == 2
     assert result.attempts == 2
     assert result.status is Status.CLAIMED
@@ -186,3 +188,114 @@ async def test_ignore_403_keeps_claim_open() -> None:
     # this slot needs manual confirmation.
     assert result.status is Status.BLOCKED
     assert "status-403-ignored" in result.signals
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 regression tests
+# ---------------------------------------------------------------------------
+
+
+async def test_prewarm_sends_url_main_first() -> None:
+    """Sites flagged ``prewarm`` must hit ``url_main`` before the probe."""
+    import asyncio
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(str(req.url))
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    cache: set[str] = set()
+    lock = asyncio.Lock()
+    site = _site(prewarm=True)
+    async with httpx.AsyncClient(transport=transport) as client:
+        await check_site(
+            client,
+            site,
+            "alice",
+            prewarm_cache=cache,
+            prewarm_lock=lock,
+            verify=False,
+        )
+    assert seen[0] == "https://example.com/"
+    assert seen[1] == "https://example.com/alice"
+
+
+async def test_prewarm_runs_only_once_per_host() -> None:
+    """Repeated checks against the same host must NOT re-prewarm."""
+    import asyncio
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(str(req.url))
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    cache: set[str] = set()
+    lock = asyncio.Lock()
+    site = _site(prewarm=True)
+    async with httpx.AsyncClient(transport=transport) as client:
+        await check_site(client, site, "alice", prewarm_cache=cache, prewarm_lock=lock, verify=False)
+        await check_site(client, site, "bob", prewarm_cache=cache, prewarm_lock=lock, verify=False)
+    # Only ONE prewarm hit (first call), then 2 probe hits
+    prewarm_hits = [u for u in seen if u == "https://example.com/"]
+    assert len(prewarm_hits) == 1
+    assert "https://example.com/alice" in seen
+    assert "https://example.com/bob" in seen
+
+
+async def test_verify_pass_promotes_agreement() -> None:
+    """When primary CLAIMED and verify also CLAIMED, ``verified=True``."""
+    import asyncio
+    seen_uas: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen_uas.append(req.headers.get("user-agent", ""))
+        return httpx.Response(200, text="welcome")
+
+    transport = httpx.MockTransport(handler)
+    site = _site()  # status_code → triggers verify
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(
+            client,
+            site,
+            "alice",
+            prewarm_cache=set(),
+            prewarm_lock=asyncio.Lock(),
+            verify=True,
+        )
+    # Two probes — primary + verify — with DIFFERENT UAs.
+    assert len(seen_uas) == 2
+    assert seen_uas[0] != seen_uas[1]
+    assert "Firefox" in seen_uas[1]
+    assert result.status is Status.CLAIMED
+    assert result.verified is True
+    assert "verify-agree" in result.signals
+    assert result.confidence > 80  # bumped
+
+
+async def test_verify_pass_demotes_disagreement() -> None:
+    """When primary CLAIMED but verify FREE, status falls to UNKNOWN."""
+    import asyncio
+    state = {"calls": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        state["calls"] += 1
+        if state["calls"] == 1:
+            return httpx.Response(200, text="welcome")
+        return httpx.Response(404, text="not found")
+
+    transport = httpx.MockTransport(handler)
+    site = _site()
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(
+            client,
+            site,
+            "alice",
+            prewarm_cache=set(),
+            prewarm_lock=asyncio.Lock(),
+            verify=True,
+        )
+    assert result.status is Status.UNKNOWN
+    assert result.verified is False
+    assert any(s.startswith("verify-disagree") for s in result.signals)

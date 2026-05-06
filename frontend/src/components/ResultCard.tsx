@@ -44,6 +44,22 @@ export function ResultCard({ r }: { r: CheckResult }) {
           {typeof r.confidence === 'number' && r.status !== 'skipped' && (
             <ConfidenceBadge value={r.confidence} status={r.status} />
           )}
+          {r.verified === true && (
+            <span
+              className="chip border border-ok/40 bg-ok/10 !py-0 text-[10px] text-ok"
+              title="Confirmed by a second probe with a rotated UA + referer."
+            >
+              ✓ verified
+            </span>
+          )}
+          {r.verified === false && (
+            <span
+              className="chip border border-warn/40 bg-warn/10 !py-0 text-[10px] text-warn"
+              title="Second probe disagreed; primary classification demoted."
+            >
+              ! conflict
+            </span>
+          )}
         </div>
         <p className="truncate text-xs text-zinc-500">
           {host}
