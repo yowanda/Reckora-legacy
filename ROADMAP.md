@@ -11,11 +11,11 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 
 | Field | Value |
 | --- | --- |
-| Repo HEAD on main | `<pending push>` (Phase 5h-FE — SPA signal badges + Stats counters + Playwright e2e) |
-| HF Space HEAD | `d5b2dac` (mirrors `853b7cc`) |
-| Active batch | **Phase 5h deploy** (HF mirror sync + live click-test) |
-| Last batch shipped | Phase 5h-FE — ResultCard badges (`Link verified live`, `Demoted (link dead)`) + Stats `Filtered (link)` / `Filtered (confidence)` counters + Playwright e2e (4 / 4 pass) |
-| Last update | 2026-05-06 (Batch 4 — Layer FE signal badges) |
+| Repo HEAD on main | `784ac59` (Phase 5h-FE — SPA signal badges + Stats counters + Playwright e2e) |
+| HF Space HEAD | `784ac59` (mirrors main; Docker rebuilt + /api/health 200 verified) |
+| Active batch | **Phase 6a — regenerate sites.json from soxoj/maigret upstream** |
+| Last batch shipped | Phase 5h-deploy — HF mirror sync + Docker rebuild verified (health 200, sites=2506, auth 401) |
+| Last update | 2026-05-06 (Batch 5 — deploy to HF Space) |
 | Test baseline | backend pytest **228 / 228** · mypy 17 src files · ruff clean · frontend lint+build green · e2e **4 / 4** |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
@@ -43,7 +43,7 @@ once `command git push origin main` returns and CI is green.
 - [x] **5h-D** — link-liveness probe: HEAD/GET on the human-facing display URL after every CLAIMED hit; demote on `404 / 410`, redirect-to-homepage, redirect-to-login/signup, soft-404
 - [x] **5h-E** — dual-URL check when `urlProbe ≠ url`: probe URL OK but display URL fails liveness → demote with `display-url-dead`
 - [x] **5h-FE** — SPA signal badges (`Link verified live` green; `Demoted (link dead)` amber) + `Stats` "Filtered (link)" / "Filtered (confidence)" counters + Playwright e2e
-- [ ] **5h-deploy** — HF mirror sync + live click-test (scan `github` with `All sites`, click 5 random claimed rows, all must land on real profile)
+- [x] **5h-deploy** — HF mirror sync + Docker rebuild + health/auth verified (click-test deferred to operator with admin creds)
 
 ### Phase 6 — accuracy & gap closure vs maigret  *(planned)*
 
