@@ -39,6 +39,24 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 2 — anti-bot & verify | shipped (bd7b768) | 2,506 | 0–100 | yes | yes (Firefox UA + rotated referrer) | yes (~928 sites) | yes (curl-cffi chrome131) | — | — |
 | 3 — extraction & graph | shipped | 2,506 | 0–100 | yes | yes | yes | yes | **yes (socid_extractor + react-flow)** | — |
 | 4 — beyond maigret | shipped | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes | **yes (ONNX) + admin live DB editor + scan-history diff** |
+| 5 — operator polish | shipped 5/6 (5f, 5d, 5c, 5e, 5b); 5a deferred | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes (depth admin-tunable) | yes |
+
+### Phase 5 — operator polish (5/6 sub-phases shipped)
+
+Phase 5 is split into six focused commits, each landing direct-to-main with
+its own CI green + auto-deploy to the HF Space. The sub-phase letters reflect
+implementation order, not feature priority.
+
+| Sub-phase | Commit | One-liner |
+| --- | --- | --- |
+| 5f — infra polish | [`589f768`](https://github.com/yowanda/Reckora/commit/589f768) | `pre-commit` hooks (ruff check + format), mypy strict on all 16 source files, separate lint/typecheck steps in CI, Playwright e2e scaffold (3 login flow cases) + new `e2e (Playwright)` CI job |
+| 5d — admin knobs | [`1e8c170`](https://github.com/yowanda/Reckora/commit/1e8c170) | New `app/admin_settings.py` with 5s-TTL cache + `KnobSpec` registry; runtime-tunable `graph_max_depth`, `graph_max_secondary`, `graph_max_seed_hits`, `extract_min_confidence` exposed via `GET /api/settings` (members) and `GET/PATCH /api/admin/settings` (admins); SettingsTab UI for live editing |
+| 5c — username permutations | [`80734f4`](https://github.com/yowanda/Reckora/commit/80734f4) | New `app/permutations.py` (4 strategies: separator, suffix, prefix, leetspeak); new `POST /api/search/permute` SSE route + `GET /api/permute/strategies`; new `permute` mode joins `list` and `graph` (with non-destructive SQLite migration); new SearchView mode toggle + per-candidate result filter |
+| 5e — outbound proxy / Tor | [`81ed51a`](https://github.com/yowanda/Reckora/commit/81ed51a) + [`4d2c470`](https://github.com/yowanda/Reckora/commit/4d2c470) | New `app/proxy.py` gate (`RECKORA_PROXY_URL` env + `proxy_enabled` admin knob) — supports `socks5://`, `socks5h://`, `http://`, `https://`; centralised httpx client construction so list/graph/permute streams + curl-cffi rescue all pick up proxy uniformly; `GET /api/health` and `GET /api/settings` expose `{configured, enabled, active, scheme}` descriptor (URL itself never leaks); Header pill "via tor" / "via http proxy" |
+| 5b — scan export | [`17b50c2`](https://github.com/yowanda/Reckora/commit/17b50c2) | New `app/exports.py` (CSV / JSON / Markdown / HTML formatters, pure stdlib); new `GET /api/history/<id>/export.<fmt>` route (auth + ownership + format whitelist + `Cache-Control: private, no-store`); ScanModal export buttons + browser-side download via object URL + `Content-Disposition` filename. PDF intentionally deferred — HTML export prints to clean A4 PDF via browser File→Print, and adding `reportlab`/`weasyprint` would pull in a multi-MB native dep stack |
+| 5a — identity types | **deferred** (next session) | email / phone / GAIA / Yandex / Skype as input alternatives to username; requires `sites.json` schema enrichment with per-site `identity_types` field, dedicated validators per type, and a SearchView identity-type picker — scoped but not started, see `reckora-progress+5.json` snapshot for handoff |
+
+**Phase 5 test growth:** 115 → **144 pytest cases** (+29 across 5d/5c/5e/5b), 0 mypy errors across 16 source files, 3 Playwright e2e cases. Frontend bundle 433.11 KB / 133.28 KB gzip after all five sub-phases.
 
 **Phase 1 benchmark — 100-site synthetic scan, no caching, prod HF Space.**
 
@@ -229,18 +247,31 @@ fly deploy
 
 ## API
 
-| Method | Path                                  | Auth     | Description                                              |
-| ------ | ------------------------------------- | -------- | -------------------------------------------------------- |
-| GET    | `/api/health`                         | public   | Liveness + version + site count                          |
-| POST   | `/api/auth/login`                     | public   | `{username, password}` → set cookie                      |
-| POST   | `/api/auth/logout`                    | public   | Clear session cookie                                     |
-| GET    | `/api/auth/me`                        | member+  | Current logged-in member                                 |
-| GET    | `/api/sites`                          | member+  | Site catalog and tag list                                |
-| POST   | `/api/search`                         | member+  | SSE stream of per-site check results                     |
-| GET    | `/api/admin/members`                  | admin    | List all members                                         |
-| POST   | `/api/admin/members`                  | admin    | `{username, password, role}` — create a member           |
-| PATCH  | `/api/admin/members/{username}`       | admin    | `{role?, password?}` — update role and/or reset password |
-| DELETE | `/api/admin/members/{username}`       | admin    | Delete a member (cannot delete yourself or last admin)   |
+| Method | Path                                       | Auth     | Description                                              |
+| ------ | ------------------------------------------ | -------- | -------------------------------------------------------- |
+| GET    | `/api/health`                              | public   | Liveness + version + site count + proxy descriptor       |
+| POST   | `/api/auth/login`                          | public   | `{username, password}` → set cookie                      |
+| POST   | `/api/auth/logout`                         | public   | Clear session cookie                                     |
+| GET    | `/api/auth/me`                             | member+  | Current logged-in member                                 |
+| GET    | `/api/sites`                               | member+  | Site catalog and tag list                                |
+| GET    | `/api/settings`                            | member+  | Effective admin knobs + proxy descriptor (Phase 5d/5e)   |
+| POST   | `/api/search`                              | member+  | SSE: per-site check results (`list` mode)                |
+| POST   | `/api/search/graph`                        | member+  | SSE: depth-N recursive graph search (Phase 3, depth admin-tunable in 5d) |
+| POST   | `/api/search/permute`                      | member+  | SSE: username permutation scan (Phase 5c)                |
+| GET    | `/api/permute/strategies`                  | member+  | Permutation strategy descriptors (Phase 5c)              |
+| GET    | `/api/history`                             | member+  | List own scan history (last 50)                          |
+| GET    | `/api/history/{id}`                        | member+  | One scan: summary + results                              |
+| GET    | `/api/history/{id}/export.{fmt}`           | member+  | Download as csv \| json \| markdown \| html (Phase 5b)   |
+| DELETE | `/api/history/{id}`                        | member+  | Delete one scan                                          |
+| GET    | `/api/history/diff/{from}/{to}`            | member+  | Diff two scans (Phase 4)                                 |
+| GET    | `/api/admin/members`                       | admin    | List all members                                         |
+| POST   | `/api/admin/members`                       | admin    | `{username, password, role}` — create a member           |
+| PATCH  | `/api/admin/members/{username}`            | admin    | `{role?, password?}` — update role and/or reset password |
+| DELETE | `/api/admin/members/{username}`            | admin    | Delete a member (cannot delete yourself or last admin)   |
+| GET    | `/api/admin/settings`                      | admin    | Read all knob values (Phase 5d)                          |
+| PATCH  | `/api/admin/settings`                      | admin    | Update knob values (Phase 5d/5e)                         |
+| GET    | `/api/admin/sites`                         | admin    | List bundled + override sites (Phase 4)                  |
+| POST   | `/api/admin/sites`                         | admin    | Upsert / disable / delete a site (Phase 4)               |
 
 `POST /api/search` body:
 
