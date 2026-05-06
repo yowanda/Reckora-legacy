@@ -274,6 +274,56 @@ async def test_verify_pass_promotes_agreement() -> None:
     assert result.confidence > 80  # bumped
 
 
+async def test_cffi_rescue_replaces_blocked_when_chrome_passes() -> None:
+    """When httpx hits a WAF body, the curl-cffi rescue (mocked) should
+    re-classify the result if Chrome impersonation gets through."""
+    import asyncio
+
+    from app.checker import check_site
+    from app.checker_cffi import CffiRescue
+
+    httpx_seen: list[str] = []
+
+    def httpx_handler(req: httpx.Request) -> httpx.Response:
+        httpx_seen.append(str(req.url))
+        # Return a Cloudflare interstitial body — should trigger BLOCKED.
+        return httpx.Response(
+            200,
+            text='<html><title>Just a moment...</title><div class="cf-browser-verification"></div></html>',
+        )
+
+    transport = httpx.MockTransport(httpx_handler)
+
+    class MockResp:
+        def __init__(self, status_code: int, text: str, url: str) -> None:
+            self.status_code = status_code
+            self.text = text
+            self.url = url
+
+    class MockSession:
+        async def get(self, url, allow_redirects=True, headers=None):
+            return MockResp(200, "user profile here for alice", url)
+        async def head(self, url, allow_redirects=True, headers=None):
+            return MockResp(200, "", url)
+        async def close(self) -> None:
+            return None
+
+    rescue = CffiRescue()
+    rescue._session = MockSession()  # bypass libcurl init
+
+    site = _site(check_type="message", presense_strs=("user profile",))
+    async with httpx.AsyncClient(transport=transport) as client:
+        result = await check_site(
+            client, site, "alice",
+            prewarm_cache=set(), prewarm_lock=asyncio.Lock(),
+            verify=False, cffi_rescue=rescue,
+        )
+    # The httpx pass landed BLOCKED (CF body), but the cffi rescue should
+    # have promoted the result back to CLAIMED.
+    assert result.status is Status.CLAIMED, result.signals
+    assert "cffi-rescue" in result.signals
+
+
 async def test_verify_pass_demotes_disagreement() -> None:
     """When primary CLAIMED but verify FREE, status falls to UNKNOWN."""
     import asyncio

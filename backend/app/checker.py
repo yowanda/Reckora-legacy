@@ -405,6 +405,7 @@ async def check_site(
     prewarm_cache: set[str] | None = None,
     prewarm_lock: asyncio.Lock | None = None,
     verify: bool = True,
+    cffi_rescue: Any = None,
 ) -> CheckResult:
     url = site.url.replace("{username}", username)
     if not _matches_regex(username, site.regex_check):
@@ -510,7 +511,7 @@ async def check_site(
     if body and _is_blocked_body(body):
         blocked_signals.append("body-fingerprint-block")
     if blocked_signals:
-        return CheckResult(
+        blocked_result = CheckResult(
             site=site.name,
             status=Status.BLOCKED,
             url=url,
@@ -522,6 +523,21 @@ async def check_site(
             signals=blocked_signals,
             attempts=attempts,
         )
+        # Phase 2.2: rescue with curl-cffi (Chrome TLS impersonation).
+        # We only call rescue on real BLOCKED, never on the 403-ignored
+        # case (those sites *expect* 403 for missing accounts).
+        if (
+            cffi_rescue is not None
+            and "status-403-ignored" not in blocked_signals
+        ):
+            rescued = await cffi_rescue.rescue(site, username)
+            if rescued is not None and rescued.status is not Status.BLOCKED:
+                # Bring across the original elapsed ms so latency is the
+                # combined cost of both probes (the user sees real e2e time).
+                rescued.elapsed_ms = int((time.perf_counter() - started) * 1000)
+                rescued.attempts = attempts
+                return rescued
+        return blocked_result
 
     status, signals = _classify_response(resp, body, site)
     # Treat upstream ratelimit / blocks as unknown rather than free if we
@@ -587,6 +603,15 @@ async def stream_checks(
     prewarm_cache: set[str] = set()
     prewarm_lock = asyncio.Lock()
 
+    # Phase 2.2: lazy curl-cffi session for BLOCKED-site rescue. Imported
+    # inline to avoid forcing the libcurl-impersonate native dep on
+    # callers that disable the rescue path.
+    cffi_rescue: Any = None
+    if settings.enable_curl_cffi:
+        from .checker_cffi import CffiRescue
+
+        cffi_rescue = CffiRescue()
+
     async def worker(site: Site) -> None:
         async with sem:
             try:
@@ -597,6 +622,7 @@ async def stream_checks(
                     prewarm_cache=prewarm_cache,
                     prewarm_lock=prewarm_lock,
                     verify=verify,
+                    cffi_rescue=cffi_rescue,
                 )
             except Exception as e:
                 result = CheckResult(
@@ -627,5 +653,7 @@ async def stream_checks(
         waiter_task.cancel()
         for t in tasks:
             t.cancel()
+        if cffi_rescue is not None:
+            await cffi_rescue.aclose()
         if owned_client:
             await client.aclose()

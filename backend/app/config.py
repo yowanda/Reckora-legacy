@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     # site that always 503s is 0.25 + 0.5 = 0.75s.
     checker_max_attempts: int = 3
     checker_retry_base_delay: float = 0.25
+    # Phase 2.2: rescue path. When httpx primary classifies a site as
+    # BLOCKED, retry with curl-cffi impersonating Chrome's TLS+H2
+    # fingerprint. ``cffi_impersonate`` matches the curl-cffi target
+    # browser (chrome120/chrome131/chrome131_android etc.). Setting
+    # ``enable_curl_cffi=False`` disables the rescue entirely (saves
+    # ~30 MB image + 100ms warm-up per scan).
+    enable_curl_cffi: bool = True
+    cffi_impersonate: str = "chrome131"
+    cffi_timeout: float = 8.0
 
 
 settings = Settings()
