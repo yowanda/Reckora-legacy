@@ -48,6 +48,22 @@ ALLOWED_KEYS = {
     "engine",
     "ignore403",
     "prewarm",
+    "identityTypes",
+}
+
+# Phase 6a: map maigret ``type`` values to Reckora identity-type names.
+# Sites whose ``type`` matches a key here get an ``identityTypes`` annotation
+# so the runtime skips them on identity-type-mismatched scans (e.g. a username
+# scan won't probe a GAIA-only site).
+_MAIGRET_TYPE_TO_IDENTITY: dict[str, str] = {
+    "gaia_id": "gaia",
+    "yandex_public_id": "yandex",
+    "vk_id": "username",
+    "steam_id": "username",
+    "ok_id": "username",
+    "yelp_userid": "username",
+    "wikimapia_uid": "username",
+    "uidme_uguid": "username",
 }
 
 # Phase 2: engines whose sites typically gate behind a session cookie set
@@ -119,6 +135,12 @@ def _resolve_site(
     cleaned.setdefault("checkType", "status_code")
     if engine_name in PREWARM_ENGINES and not cleaned.get("prewarm"):
         cleaned["prewarm"] = True
+    # Phase 6a: auto-import identityTypes from maigret ``type`` field.
+    maigret_type = site.get("type")
+    if maigret_type and maigret_type in _MAIGRET_TYPE_TO_IDENTITY:
+        mapped = _MAIGRET_TYPE_TO_IDENTITY[maigret_type]
+        if mapped != "username":
+            cleaned["identityTypes"] = [mapped]
     return cleaned
 
 

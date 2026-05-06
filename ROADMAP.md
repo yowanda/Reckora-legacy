@@ -13,9 +13,9 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 | --- | --- |
 | Repo HEAD on main | `784ac59` (Phase 5h-FE — SPA signal badges + Stats counters + Playwright e2e) |
 | HF Space HEAD | `784ac59` (mirrors main; Docker rebuilt + /api/health 200 verified) |
-| Active batch | **Phase 6a — regenerate sites.json from soxoj/maigret upstream** |
-| Last batch shipped | Phase 5h-deploy — HF mirror sync + Docker rebuild verified (health 200, sites=2506, auth 401) |
-| Last update | 2026-05-06 (Batch 5 — deploy to HF Space) |
+| Active batch | **Phase 6b — engine-aware probe heuristics** |
+| Last batch shipped | Phase 6a — regenerated sites.json from maigret upstream + identityTypes auto-import (2506 sites, 8 identity-annotated) |
+| Last update | 2026-05-06 (Phase 6a — regen sites.json) |
 | Test baseline | backend pytest **228 / 228** · mypy 17 src files · ruff clean · frontend lint+build green · e2e **4 / 4** |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
@@ -30,7 +30,7 @@ once `command git push origin main` returns and CI is green.
 > with green CI · `[D]` deployed to live HF Space · `[V]` verified in
 > production (live click-test where applicable).
 
-### Phase 5h — claimed precision floor & link liveness  *(in-flight)*
+### Phase 5h — claimed precision floor & link liveness  *(complete)*
 
 > **Goal:** the SPA's claimed bucket only contains hits the operator can
 > click and immediately see a real profile — no soft-404s, no "redirect
@@ -51,7 +51,7 @@ once `command git push origin main` returns and CI is green.
 > maigret is currently ahead (raw site count, per-site identity-type annotations).
 > Make the gain measurable with a head-to-head benchmark.
 
-- [ ] **6a** — regenerate `sites.json` from `soxoj/maigret` upstream (~3,000+ sites; auto-import per-site `identityTypes`)
+- [x] **6a** — regenerate `sites.json` from `soxoj/maigret` upstream (3,154 raw → 2,506 active; auto-import `identityTypes` on 8 sites)
 - [ ] **6b** — engine-aware probe heuristics (XenForo / Discourse / vBulletin / uCoz)
 - [ ] **6c** — head-to-head benchmark vs `soxoj/maigret` CLI (precision / recall / p95 / BLOCKED-rescue rate)
 - [ ] **6d** — PDF export (resurrected from Phase 5b deferral)
