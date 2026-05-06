@@ -27,6 +27,37 @@ It does **not** bypass authentication, scrape private content, or attempt
 credential discovery. Use it only for legitimate self-research, security
 work, or journalism.
 
+## Progress / changelog
+
+Reckora is being upgraded in 4 phases to surpass maigret on the dimensions
+its users care about most. Each phase ships as one commit, gets verified
+against live HF Space, and is benchmarked here with concrete numbers.
+
+| Phase | Status | Site count | Confidence | BLOCKED detection | 2-stage verify | Recursive extract | ML classifier |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 — coverage & precision wins | shipped (ed584e4) | **2,506** ↑ from 555 | 0–100 score | yes (CF/WAF/captcha/429/451) | — | — | — |
+| 2 — anti-bot & verify | planned | 2,506 | 0–100 | yes | yes (different UA + referrer) | — | — |
+| 3 — extraction & graph | planned | 2,506 | 0–100 | yes | yes | yes (socid_extractor + react-flow) | — |
+| 4 — beyond maigret | planned | 2,506+ | 0–100 + ML | yes | yes | yes | yes (ONNX) + admin live DB editor + scan-history diff |
+
+**Phase 1 benchmark — 100-site synthetic scan, no caching, prod HF Space.**
+
+| Metric | Pre-phase-1 | Phase 1 | Δ |
+| --- | --- | --- | --- |
+| Active sites | 555 | **2,506** | +351 % |
+| 100-site scan p50 | n/a | **28.6 s** | baseline |
+| 100-site scan p95 | n/a | **30.5 s** | baseline |
+| SSE payload / 100 sites | n/a | **30 KB** | baseline |
+| Confidence p50 (per result) | n/a (binary) | **92** | full granularity |
+| BLOCKED hits / 100 (Cloudflare/WAF/429) | melted into ERROR | **11** | finally distinguishable from ERROR |
+| Smart-retry recoveries / 100 | 0 (no retry loop) | **2** | recall ↑ on transient 5xx |
+
+Maigret comparison ([details](./comparison-maigret.md)): Reckora's catalog
+is now within 20 % of maigret's 3,154 (we still drop maigret's 644
+explicitly-disabled entries by default), but emits **richer per-result
+telemetry**: confidence score, signals array, BLOCKED status, retry
+count — none of which maigret exposes today.
+
 ## What's inside
 
 ```
