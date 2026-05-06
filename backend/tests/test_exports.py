@@ -322,3 +322,41 @@ def test_export_route_respects_member_ownership(client: TestClient, recorded_sca
         headers=_hdr(other_token),
     )
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Phase 6d — PDF export
+# ---------------------------------------------------------------------------
+
+
+class TestPdfExport:
+    def test_pdf_fallback_returns_html_bytes(self) -> None:
+        """When weasyprint is NOT installed, to_pdf falls back to HTML bytes."""
+        scan = _summary()
+        results = _results()
+        pdf_bytes = exports_mod.to_pdf(scan, results)
+        assert isinstance(pdf_bytes, bytes)
+        # Fallback produces HTML (starts with DOCTYPE).
+        assert pdf_bytes.startswith(b"<!DOCTYPE html")
+
+    def test_pdf_in_allowed_formats(self) -> None:
+        assert "pdf" in exports_mod.ALLOWED_FORMATS
+
+    def test_pdf_media_type(self) -> None:
+        assert exports_mod.MEDIA_TYPES["pdf"] == "application/pdf"
+
+    def test_pdf_extension(self) -> None:
+        assert exports_mod.EXTENSIONS["pdf"] == "pdf"
+
+    def test_pdf_filename(self) -> None:
+        scan = _summary()
+        fname = exports_mod.filename_for(scan, "pdf")
+        assert fname.endswith(".pdf")
+        assert "torvalds" in fname
+
+    def test_render_pdf_dispatcher(self) -> None:
+        scan = _summary()
+        results = _results()
+        body, _media, fname = exports_mod.render("pdf", scan, results)
+        assert isinstance(body, bytes)
+        assert fname.endswith(".pdf")

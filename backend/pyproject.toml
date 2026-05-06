@@ -45,6 +45,8 @@ dev = [
     "scikit-learn>=1.4.0",
     "skl2onnx>=1.17.0",
 ]
+# Phase 6d: server-side PDF export via weasyprint.
+pdf = ["weasyprint>=62.0"]
 
 [build-system]
 requires = ["hatchling"]

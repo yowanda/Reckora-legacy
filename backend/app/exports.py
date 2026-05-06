@@ -1,4 +1,4 @@
-"""Phase 5b: scan-history export formatters.
+"""Phase 5b + 6d: scan-history export formatters.
 
 Each renderer takes a ``(ScanSummary, results)`` pair and produces a
 single self-contained artefact:
@@ -13,11 +13,9 @@ single self-contained artefact:
   * ``html`` — full standalone document (inline styles, no external
     assets) — opens directly in a browser, prints cleanly to PDF via
     "File → Print → Save as PDF".
-
-Why no ``reportlab``-rendered PDF? Adding it would pull in a 12 MB
-dep tree that the rest of the app doesn't need; the HTML export
-already prints to a clean A4 PDF. We can add it in a follow-up if
-operators report the print path is too clunky.
+  * ``pdf``  — Phase 6d: server-side PDF via ``weasyprint``.  Falls back
+    to ``html`` when weasyprint is not installed (optional ``[pdf]``
+    extra).
 
 The endpoints live in ``main.py`` (``GET
 /api/history/<id>/export.<format>``) and stream a single
@@ -35,9 +33,9 @@ from typing import Any, Final, Literal
 
 from .history import ScanSummary
 
-ExportFormat = Literal["csv", "json", "markdown", "html"]
+ExportFormat = Literal["csv", "json", "markdown", "html", "pdf"]
 
-ALLOWED_FORMATS: Final[frozenset[str]] = frozenset({"csv", "json", "markdown", "html"})
+ALLOWED_FORMATS: Final[frozenset[str]] = frozenset({"csv", "json", "markdown", "html", "pdf"})
 
 # Status label map — kept here so all exports use the same casing.
 _STATUS_LABEL: Final[dict[str, str]] = {
@@ -68,6 +66,7 @@ MEDIA_TYPES: Final[dict[str, str]] = {
     "json": "application/json; charset=utf-8",
     "markdown": "text/markdown; charset=utf-8",
     "html": "text/html; charset=utf-8",
+    "pdf": "application/pdf",
 }
 
 # Filename suffix per format.
@@ -76,6 +75,7 @@ EXTENSIONS: Final[dict[str, str]] = {
     "json": "json",
     "markdown": "md",
     "html": "html",
+    "pdf": "pdf",
 }
 
 
@@ -301,6 +301,35 @@ def to_html(scan: ScanSummary, results: list[dict[str, Any]]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# PDF (Phase 6d) — optional weasyprint dependency
+# ---------------------------------------------------------------------------
+
+
+def _weasyprint_available() -> bool:
+    try:
+        import weasyprint as _wp  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def to_pdf(scan: ScanSummary, results: list[dict[str, Any]]) -> bytes:
+    """Render the HTML report to PDF bytes via weasyprint.
+
+    Falls back to the HTML export (UTF-8 bytes) when weasyprint is not
+    installed.
+    """
+    html_str = to_html(scan, results)
+    try:
+        import weasyprint
+
+        return weasyprint.HTML(string=html_str).write_pdf()
+    except ImportError:
+        return html_str.encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -312,8 +341,9 @@ def render(
 ) -> tuple[bytes, str, str]:
     """Render ``(scan, results)`` to ``(body, media_type, filename)``.
 
-    Returns bytes (UTF-8 encoded) so the FastAPI ``Response`` can ship
-    them directly.
+    Returns bytes so the FastAPI ``Response`` can ship them directly.
+    For text formats the bytes are UTF-8 encoded text; for ``pdf`` the
+    bytes are the raw PDF document.
     """
     if fmt == "csv":
         text = to_csv(scan, results)
@@ -323,6 +353,9 @@ def render(
         text = to_markdown(scan, results)
     elif fmt == "html":
         text = to_html(scan, results)
+    elif fmt == "pdf":
+        pdf_bytes = to_pdf(scan, results)
+        return pdf_bytes, MEDIA_TYPES["pdf"], filename_for(scan, fmt)
     else:  # pragma: no cover — guarded by ALLOWED_FORMATS at the route
         raise ValueError(f"unknown export format: {fmt}")
     return text.encode("utf-8"), MEDIA_TYPES[fmt], filename_for(scan, fmt)
