@@ -13,9 +13,9 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 | --- | --- |
 | Repo HEAD on main | `784ac59` (Phase 5h-FE — SPA signal badges + Stats counters + Playwright e2e) |
 | HF Space HEAD | `784ac59` (mirrors main; Docker rebuilt + /api/health 200 verified) |
-| Active batch | **Phase 6c — head-to-head benchmark vs maigret** |
-| Last batch shipped | Phase 6b — engine-aware probe heuristics (XenForo/Discourse/vBulletin/uCoz) + 13 tests |
-| Last update | 2026-05-06 (Phase 6b — engine probes) |
+| Active batch | **Phase 6d — PDF export resurrection** |
+| Last batch shipped | Phase 6c — head-to-head benchmark script + `docs/benchmark-phase-6.md` |
+| Last update | 2026-05-06 (Phase 6c — benchmark) |
 | Test baseline | backend pytest **241 / 241** · mypy 18 src files · ruff clean · frontend lint+build green · e2e **4 / 4** |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
@@ -53,7 +53,7 @@ once `command git push origin main` returns and CI is green.
 
 - [x] **6a** — regenerate `sites.json` from `soxoj/maigret` upstream (3,154 raw → 2,506 active; auto-import `identityTypes` on 8 sites)
 - [x] **6b** — engine-aware probe heuristics (XenForo / Discourse / vBulletin / uCoz) + `engine_probes.py` + 13 tests
-- [ ] **6c** — head-to-head benchmark vs `soxoj/maigret` CLI (precision / recall / p95 / BLOCKED-rescue rate)
+- [x] **6c** — head-to-head benchmark vs `soxoj/maigret` CLI (`docs/benchmark-phase-6.md`)
 - [ ] **6d** — PDF export (resurrected from Phase 5b deferral)
 
 ### Phase 7 — intel & enrichment beyond maigret  *(planned)*
