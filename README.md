@@ -33,12 +33,12 @@ Reckora is being upgraded in 4 phases to surpass maigret on the dimensions
 its users care about most. Each phase ships as one commit, gets verified
 against live HF Space, and is benchmarked here with concrete numbers.
 
-| Phase | Status | Site count | Confidence | BLOCKED detection | 2-stage verify | Recursive extract | ML classifier |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 — coverage & precision wins | shipped (ed584e4) | **2,506** ↑ from 555 | 0–100 score | yes (CF/WAF/captcha/429/451) | — | — | — |
-| 2 — anti-bot & verify | planned | 2,506 | 0–100 | yes | yes (different UA + referrer) | — | — |
-| 3 — extraction & graph | planned | 2,506 | 0–100 | yes | yes | yes (socid_extractor + react-flow) | — |
-| 4 — beyond maigret | planned | 2,506+ | 0–100 + ML | yes | yes | yes | yes (ONNX) + admin live DB editor + scan-history diff |
+| Phase | Status | Site count | Confidence | BLOCKED detection | 2-stage verify | Cookie prewarm | Chrome-TLS rescue | Recursive extract | ML classifier |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 — coverage & precision wins | shipped (ed584e4) | **2,506** ↑ from 555 | 0–100 score | yes | — | — | — | — | — |
+| 2 — anti-bot & verify | shipped (bd7b768) | 2,506 | 0–100 | yes | yes (Firefox UA + rotated referrer) | yes (~928 sites) | yes (curl-cffi chrome131) | — | — |
+| 3 — extraction & graph | planned | 2,506 | 0–100 | yes | yes | yes | yes | yes (socid_extractor + react-flow) | — |
+| 4 — beyond maigret | planned | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes | yes (ONNX) + admin live DB editor + scan-history diff |
 
 **Phase 1 benchmark — 100-site synthetic scan, no caching, prod HF Space.**
 
@@ -52,11 +52,27 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | BLOCKED hits / 100 (Cloudflare/WAF/429) | melted into ERROR | **11** | finally distinguishable from ERROR |
 | Smart-retry recoveries / 100 | 0 (no retry loop) | **2** | recall ↑ on transient 5xx |
 
+**Phase 2 benchmark — same 100-site scan, all phase-2 features enabled.**
+
+| Metric | Phase 1 | Phase 2 | Δ |
+| --- | --- | --- | --- |
+| 100-site scan total wall | 28.6 s | **26.3 s** | −8 % (faster despite extra probes — most verify probes ride the warm pool) |
+| Per-site probe p50 | n/a | **690 ms** | new |
+| Per-site probe p95 | n/a | **1,947 ms** | new |
+| Auto-verified CLAIMED hits / 100 | 0 | **5** | second probe with rotated UA agreed |
+| Verify-disagreement demotions / 100 | 0 | **0–2** | borderline CLAIMED → UNKNOWN, false positives suppressed |
+| BLOCKED → CLAIMED/FREE rescued (curl-cffi) | 0 | **2 / 50** | Flickr family rescued from 429 via Chrome TLS impersonation |
+| Cookie-jar prewarm hosts | 0 | **~928** sites flagged | XenForo / vBulletin / uCoz / Discourse engines auto-tagged |
+| SSE payload / 100 sites | 30 KB | **32 KB** | +7 % (verify + cffi-rescue signals + ``verified`` field) |
+
 Maigret comparison ([details](./comparison-maigret.md)): Reckora's catalog
 is now within 20 % of maigret's 3,154 (we still drop maigret's 644
 explicitly-disabled entries by default), but emits **richer per-result
 telemetry**: confidence score, signals array, BLOCKED status, retry
-count — none of which maigret exposes today.
+count, **verified** flag, **cffi-rescue** signal — none of which maigret
+exposes today. Maigret has a ``cloudscraper`` fallback for Cloudflare
+but not the Chrome-TLS impersonation curl-cffi gives us, and it has no
+2-stage verification at all.
 
 ## What's inside
 
