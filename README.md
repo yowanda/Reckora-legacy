@@ -43,7 +43,7 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 6 — accuracy & gap closure vs maigret | shipped (4/4: 6a, 6b, 6c, 6d) | **2,506** (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
 | 7 — intel & enrichment | shipped 4/4 (**7a** pHash + **7b** WHOIS/HIBP + **7c** reverse-image + **7d** ML retrain + drift) | 2,506+ | 0–100 + ML retrainable | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image/ML drift |
 | 8 — scale & infra | shipped (4/4: 8a Celery+Redis, 8b proxy rotator, 8c GraphQL gateway, 8d public-scan edge cache; deployed `0551938 → 5723927`) | 2,506 | 0–100 + ML | yes (distributed worker fleet, opt-in) | yes | yes | yes (rotating proxy pool, opt-in) | yes | yes |
-| 9 — anti-bot probe + scale-out reliability | in-flight (4/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; **9c** geo-aware proxy selection shipped — `ecbebef`; **9d** CAPTCHA classifier + structured `UNKNOWN` labelling shipped — `18903bc`; 9e–9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via 9e | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware proxy selection via **9c — shipped**; CAPTCHA classifier via **9d — shipped**) | yes | yes |
+| 9 — anti-bot probe + scale-out reliability | in-flight (5/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; **9c** geo-aware proxy selection shipped — `ecbebef`; **9d** CAPTCHA classifier + structured `UNKNOWN` labelling shipped — `18903bc`; **9e** quarterly catalog auto-refresh shipped — `ac9bbdf`; 9f–9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via **9e — shipped** | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware proxy selection via **9c — shipped**; CAPTCHA classifier via **9d — shipped**) | yes | yes |
 
 > [`ROADMAP.md`](./ROADMAP.md) is the **single source of truth** for what's
 > in flight + planned. The "Live status" header at the top of the roadmap is
@@ -128,13 +128,33 @@ against live HF Space, and is benchmarked here with concrete numbers.
 > (silent UNKNOWN on CAPTCHA challenge; **MEDIUM**); opt-in via
 > the `enable_captcha_classifier` admin knob with the
 > classifier module gated behind the knob check (never imported
-> on the hot path when off). The remaining 4 sub-phases (9e–9h)
-> cover quarterly catalog auto-refresh from upstream maigret,
-> per-scan hard budget with a new `SKIPPED` bucket, proxy
-> reputation warm-up / weighted selection, and an HF Space
-> keep-warm cron. Each Phase 9 sub-phase carries the
-> residual-risk ID it closes (`C1`, `C2`, `M1`–`M7` from the
-> Phase 8 deploy debrief) and is detailed in
+> on the hot path when off).
+> **9e (quarterly catalog auto-refresh from upstream maigret) is
+> shipped** (`ac9bbdf`): a CI-driven quarterly refresh that
+> downloads the latest tagged
+> `soxoj/maigret/maigret/resources/data.json`, regenerates the
+> bundled `backend/app/data/sites.json` via the existing
+> `scripts/build_sites.py` pipeline, runs the new
+> `backend/scripts/refresh_catalog.py` diff classifier (five
+> categories — added / removed / url_changed /
+> identityType_changed / engine_hint_changed), preserves the
+> Reckora-specific overrides `prewarm` / `ignore403` /
+> `requestHeadOnly` / `identityTypes` so a quarterly refresh
+> never undoes Phase 5h cookie-prewarm tags or Phase 6 trim
+> flags, and opens a PR titled `chore(catalog): quarterly
+> refresh from soxoj/maigret <tag>` with the markdown diff
+> inlined as the PR body — closing residual-risk **M4**
+> (~5%/year drift in bundled catalog; **MEDIUM**) by dropping
+> drift to ≤1%/quarter. No runtime feature, no admin knob, no
+> app code path — the diff classifier and renderer are imported
+> only by the cron job and by the unit tests, so the bundled
+> `sites.json` is unchanged in this commit (byte-for-byte
+> identical to the prior `main` HEAD). The remaining 3
+> sub-phases (9f–9h) cover per-scan hard budget with a new
+> `SKIPPED` bucket, proxy reputation warm-up / weighted
+> selection, and an HF Space keep-warm cron. Each Phase 9
+> sub-phase carries the residual-risk ID it closes (`C1`, `C2`,
+> `M1`–`M7` from the Phase 8 deploy debrief) and is detailed in
 > [`ROADMAP.md`](./ROADMAP.md).
 
 ### Phase 5 — operator polish (8/8 sub-phases shipped)
