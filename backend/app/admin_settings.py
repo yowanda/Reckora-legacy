@@ -61,12 +61,14 @@ KNOBS: tuple[KnobSpec, ...] = (
         key="graph_max_depth",
         settings_attr="graph_max_depth",
         minimum=0,
-        maximum=1,
+        maximum=3,
         description=(
             "Maximum recursion depth for /api/search/graph. "
             "0 collapses to a regular search (graph view shows just the "
             "primary scan); 1 enables one level of secondary scans on "
-            "extracted identifiers."
+            "extracted identifiers; 2-3 (Phase 10d) enable deeper "
+            "investigations gated by ``graph_secondary_min_confidence`` "
+            "and ``graph_max_total_subscans``."
         ),
     ),
     KnobSpec(
@@ -88,6 +90,38 @@ KNOBS: tuple[KnobSpec, ...] = (
         description=(
             "Cap on the number of primary CLAIMED hits whose extracted "
             "identifiers are eligible to seed sub-scans."
+        ),
+    ),
+    KnobSpec(
+        key="graph_secondary_min_confidence",
+        settings_attr="graph_secondary_min_confidence",
+        minimum=50,
+        maximum=100,
+        description=(
+            "Phase 10d: minimum CLAIMED confidence (50-100) a secondary "
+            "or deeper sub-scan hit must reach before it is allowed to "
+            "spawn another generation of sub-scans. Tighter than the "
+            "Phase 5h ``min_claimed_confidence`` floor because deep "
+            "graph nodes compound noise — at depth 2 a 70% rule-based "
+            "score is much shakier than the same score at depth 1. "
+            "Default 80 keeps tertiary recursion conservative; lower "
+            "for max recall, raise for max precision."
+        ),
+    ),
+    KnobSpec(
+        key="graph_max_total_subscans",
+        settings_attr="graph_max_total_subscans",
+        minimum=50,
+        maximum=500,
+        description=(
+            "Phase 10d: hard cap on the *total* number of secondary + "
+            "tertiary sub-scans spawned for a single graph search, "
+            "regardless of the per-parent ``graph_max_secondary`` cap. "
+            "Prevents exponential blow-up at depth 3 where worst case "
+            "is N_seed * max_secondary^2 ~ 8 * 5 * 5 = 200 sub-scans. "
+            "Once the cap is hit, every further candidate emits a "
+            "SKIPPED result with reason ``graph_subscan_cap`` so the "
+            "SPA can render a counter."
         ),
     ),
     KnobSpec(

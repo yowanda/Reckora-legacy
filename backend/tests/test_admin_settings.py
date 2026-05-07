@@ -190,7 +190,8 @@ def test_admin_get_settings_describes_all_knobs(
     assert set(knobs) == set(admin_settings_mod.ALLOWED_KEYS)
     depth = knobs["graph_max_depth"]
     assert depth["minimum"] == 0
-    assert depth["maximum"] == 1
+    # Phase 10d bumped the maximum from 1 to 3 to unlock depth=2/3.
+    assert depth["maximum"] == 3
     assert depth["override"] is None
 
 

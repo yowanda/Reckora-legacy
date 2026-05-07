@@ -55,6 +55,30 @@ class Settings(BaseSettings):
     graph_max_depth: int = 1
     graph_max_secondary: int = 5
     graph_max_seed_hits: int = 8
+    # Phase 10d: deep recursion knobs.
+    #
+    # ``graph_max_depth`` now ranges 0-3 (previously 0-1). To prevent the
+    # exponential blow-up that comes with depth>1 we add two cross-cutting
+    # caps:
+    #
+    # * ``graph_secondary_min_confidence`` (50-100, default 80) — every
+    #   *child* CLAIMED hit must clear this rule-based confidence floor
+    #   before its extracted handles are allowed to spawn the next
+    #   generation. The Phase 5h ``min_claimed_confidence=60`` floor
+    #   already gates the row from staying CLAIMED in the first place;
+    #   this stricter floor on top recognises that a 70% score at depth
+    #   2 is much shakier than the same score at depth 1 because errors
+    #   compound across hops.
+    # * ``graph_max_total_subscans`` (50-500, default 200) — hard cap on
+    #   the total number of secondary + tertiary sub-scans spawned
+    #   across the whole graph search, regardless of the per-parent
+    #   ``graph_max_secondary`` cap. Hitting the cap surfaces a
+    #   SKIPPED row with reason ``graph_subscan_cap`` so the SPA can
+    #   render a counter; existing behaviour at depth 1 is unchanged
+    #   because the worst-case at depth 1 is N_seed * max_secondary =
+    #   8 * 5 = 40, well below the default cap of 200.
+    graph_secondary_min_confidence: int = 80
+    graph_max_total_subscans: int = 200
     # Phase 4: ML-confidence classifier. Disable to drop the
     # onnxruntime cost entirely; the rule-based classifier remains
     # untouched. The threshold below picks borderline rule-based
