@@ -11,12 +11,12 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 
 | Field | Value |
 | --- | --- |
-| Repo HEAD on main | `945c6bc` (Phase 7d — ML reranker retrain pipeline + drift detector) |
-| HF Space HEAD | `0551938` (mirrors main `945c6bc` — Phase 6 + Phase 7 catch-up deployed 2026-05-07; health 200, sites 2506, all Phase 6/7 endpoints `/api/enrich/email` / `/api/reverse-image` / `/api/admin/ml/status` / `/api/admin/ml/retrain` / `/api/search/permute` respond 401 not 404, confirming new code is live) |
-| Active batch | _none — Phase 7 closed and HF mirror caught up; next batch TBD (Phase 8a Celery+Redis is the planned default)_ |
-| Last batch shipped | Phase 7-deploy — HF Space mirror sync (Phase 6 + Phase 7 catch-up: 8 commits `8faf4c8`→`945c6bc` rsync-mirrored to HF Space `784ac59`→`0551938`; Docker rebuild green; health 200 / sites 2506; every new Phase 6+7 endpoint reachable behind auth gate) |
-| Last update | 2026-05-07 (Phase 7-deploy — HF mirror sync) |
-| Test baseline | backend pytest **356 / 356** · mypy 23 src files · ruff clean · frontend lint+build green · e2e **8 / 8** |
+| Repo HEAD on main | Phase 8a — distributed worker fleet via Celery + Redis, opt-in via `RECKORA_USE_CELERY=1`; default deployment (HF Space single container) keeps the in-process asyncio fan-out (SHA stamped by the next ROADMAP-bump commit per workflow rule §6) |
+| HF Space HEAD | `0551938` (mirrors main `945c6bc` — Phase 6 + Phase 7 catch-up deployed 2026-05-07; HF Space stays on the in-process path because the `[scale]` extra is opt-in; flip `RECKORA_USE_CELERY=1` + ship a Redis broker to switch to the distributed fan-out without redeploying app code) |
+| Active batch | _none — Phase 8a shipped; next default candidate is Phase 8b (rate-limit-aware proxy rotator) once an operator opts the Celery path on in production_ |
+| Last batch shipped | Phase 8a — distributed worker fleet (`backend/app/tasks.py` adds Celery `check_site_task`; `[scale]` extra pins `celery>=5.4` + `redis>=5.0`; `stream_checks` transparently dispatches to `stream_checks_via_celery` when `settings.use_celery` is set; `docker-compose.celery.yml` brings up redis + 2 workers + api locally; 7 new backend tests + 363 / 363 pytest baseline; ruff / format / mypy clean; frontend e2e 8 / 8) |
+| Last update | 2026-05-07 (Phase 8a — Celery + Redis fan-out shipped) |
+| Test baseline | backend pytest **363 / 363** · mypy 24 src files · ruff clean · frontend lint+build green · e2e **8 / 8** |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
 HEAD on main` and `Last update` lines are updated at the end of every batch
@@ -67,12 +67,12 @@ once `command git push origin main` returns and CI is green.
 - [x] **7d** — ML reranker retrain pipeline + drift detector (`app/ml_drift.py` pure-Python two-sample Kolmogorov-Smirnov + `FeatureSummary`/`FeatureDrift`/`DriftReport` dataclasses; `app/ml_retrain.py` synchronous trainer that subprocess-runs `scripts/train_ml.py`, persists `RetrainStatus` to `app/ml/retrain_status.json` so it survives worker restarts; admin knobs `ml_drift_ks_threshold_pct` + `ml_drift_window_size`; ML scoring fan-outs into a bounded ring buffer used as the drift "current" sample; new admin endpoints `GET /api/admin/ml/status` + `POST /api/admin/ml/retrain`; SPA AdminPanel grows an `ML` tab with model age, last-retrain row, "Retrain now" button, drift summary chip and per-feature KS table; 31 new backend tests + a Playwright e2e)
 - [x] **7-deploy** — HF Space mirror sync to catch up with main (8 commits `8faf4c8`→`945c6bc` rsync-mirrored to HF Space `784ac59`→`0551938`; Docker rebuild green; `GET /api/health` 200 with sites=2506; every Phase 6+7 endpoint verified reachable behind auth gate: `POST /api/enrich/email`, `POST /api/reverse-image`, `GET /api/admin/ml/status`, `POST /api/admin/ml/retrain`, `POST /api/search/permute`, `GET /api/permute/strategies` — all return 401 "login required" not 404/405, confirming new code is live; click-test deferred to operator with admin creds)
 
-### Phase 8 — scale & infra  *(planned)*
+### Phase 8 — scale & infra  *(in flight)*
 
 > **Goal:** make Reckora scale horizontally so a `10k`-site catalog and `100s`
 > of concurrent operator scans don't melt a single `uvicorn` process.
 
-- [ ] **8a** — distributed worker fleet (Celery + Redis queue)
+- [x] **8a** — distributed worker fleet via Celery + Redis (opt-in `[scale]` extra ships `celery>=5.4` + `redis>=5.0`; `backend/app/tasks.py` defines `check_site_task` and a JSON-only Celery app with acks-late + reject-on-worker-lost for at-least-once semantics; `stream_checks` transparently dispatches to `stream_checks_via_celery` when `settings.use_celery=1`, polling each `AsyncResult` and yielding rebuilt `CheckResult` rows so the SSE pipeline is unchanged; `docker-compose.celery.yml` runs `redis:7-alpine` + 2 worker replicas + the API container for local dev; 7 new backend tests in `tests/test_tasks.py` cover dict round-trip, eager-mode task body, fan-out across multiple sites, and the `stream_checks` dispatch hook; default deployment (HF Space single container) keeps the in-process path so this batch ships the *capability* without changing the default runtime)
 - [ ] **8b** — rate-limit-aware proxy rotator (multi-proxy pool + per-host token bucket)
 - [ ] **8c** — GraphQL gateway (alternate transport over the existing REST/SSE)
 - [ ] **8d** — public-scan edge cache (CDN-friendly static rendering for shared scans)

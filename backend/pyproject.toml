@@ -54,6 +54,12 @@ dev = [
 ]
 # Phase 6d: server-side PDF export via weasyprint.
 pdf = ["weasyprint>=62.0"]
+# Phase 8a: distributed worker fleet (Celery + Redis broker / result backend).
+# Opt-in via env var ``RECKORA_USE_CELERY=1``; without it the runtime keeps
+# the in-process asyncio fan-out so HF Space's single-container deployment
+# does not require a separate broker. Pinning ``celery>=5.4`` for the
+# improved type hints + ``redis>=5.0`` for the async client.
+scale = ["celery>=5.4.0", "redis>=5.0.0"]
 
 [build-system]
 requires = ["hatchling"]

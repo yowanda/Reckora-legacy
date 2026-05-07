@@ -54,10 +54,45 @@ from .sites import Site
 __all__ = [
     "CheckResult",
     "Status",
+    "check_result_from_dict",
     "check_site",
     "is_valid_username",
     "stream_checks",
+    "stream_checks_via_celery",
 ]
+
+
+def check_result_from_dict(payload: dict[str, Any]) -> CheckResult:
+    """Reverse of ``CheckResult.to_dict``.
+
+    Used by the Phase 8a Celery collector to rebuild ``CheckResult``
+    objects from JSON returned by ``check_site_task`` so that
+    downstream callers (the SSE stream pipeline, history recorder, ML
+    recorder) receive the same dataclass shape regardless of whether
+    the in-process or distributed path produced the result.
+    """
+
+    status_raw = payload.get("status", Status.ERROR.value)
+    try:
+        status = Status(status_raw)
+    except ValueError:
+        status = Status.ERROR
+    return CheckResult(
+        site=str(payload.get("site", "")),
+        status=status,
+        url=str(payload.get("url", "")),
+        url_main=str(payload.get("url_main", "")),
+        tags=list(payload.get("tags") or ()),
+        http_status=payload.get("http_status"),
+        elapsed_ms=payload.get("elapsed_ms"),
+        error=payload.get("error"),
+        confidence=int(payload.get("confidence") or 0),
+        signals=list(payload.get("signals") or ()),
+        attempts=int(payload.get("attempts") or 1),
+        verified=payload.get("verified"),
+        extracted=payload.get("extracted"),
+        ml_confidence=payload.get("ml_confidence"),
+    )
 
 
 def _extract_min_confidence() -> int:
@@ -1046,7 +1081,22 @@ async def stream_checks(
     ``extract`` toggles the Phase 3 identity-extraction step on confident
     CLAIMED hits (default on; ``False`` keeps ``CheckResult.extracted``
     as ``None`` and skips the regex pass entirely).
+
+    Phase 8a: when ``settings.use_celery`` is set the implementation
+    transparently dispatches to ``stream_checks_via_celery`` so the
+    SSE pipeline does not need to know which fan-out it got. Default
+    (``use_celery=0``) keeps the in-process asyncio path below.
     """
+    if settings.use_celery:
+        async for r in stream_checks_via_celery(
+            sites,
+            username,
+            identity_type=identity_type,
+            verify=verify,
+            extract=extract,
+        ):
+            yield r
+        return
     owned_client = client is None
     if owned_client:
         # http2=True saves ~1 RTT per host on warm pools; many CMS-hosted
@@ -1128,3 +1178,75 @@ async def stream_checks(
             await cffi_rescue.aclose()
         if owned_client:
             await client.aclose()
+
+
+async def stream_checks_via_celery(
+    sites: list[Site],
+    username: str,
+    *,
+    identity_type: IdentityType = DEFAULT_IDENTITY_TYPE,
+    verify: bool = True,
+    extract: bool = True,
+) -> AsyncIterator[CheckResult]:
+    """Phase 8a: distributed fan-out via Celery + Redis.
+
+    Submits one ``check_site_task`` per site, then polls each
+    ``AsyncResult`` from the API process and yields completed results
+    as they arrive. ``settings.celery_poll_interval`` controls the poll
+    cadence; ``settings.celery_task_timeout`` is honoured worker-side
+    via the per-task soft / hard timeouts on ``celery_app``.
+
+    On task FAILURE / timeout the collector synthesises an ERROR
+    ``CheckResult`` so the SSE stream stays consistent with the
+    in-process path; the caller cannot tell which fan-out produced a
+    given row beyond the (intentionally unobservable) latency
+    distribution.
+    """
+
+    if not sites:
+        return
+
+    # Local import — celery is only required when use_celery=1.
+    from .tasks import check_site_task
+
+    async_results = [
+        check_site_task.delay(
+            s.name,
+            username,
+            identity_type,
+            verify=verify,
+            extract=extract,
+        )
+        for s in sites
+    ]
+    pending: dict[str, Any] = {s.name: ar for s, ar in zip(sites, async_results, strict=True)}
+    site_by_name = {s.name: s for s in sites}
+    poll = max(0.005, float(settings.celery_poll_interval))
+
+    while pending:
+        done_now: list[str] = []
+        for name, ar in pending.items():
+            if ar.ready():
+                done_now.append(name)
+        if not done_now:
+            await asyncio.sleep(poll)
+            continue
+        for name in done_now:
+            ar = pending.pop(name)
+            site = site_by_name[name]
+            try:
+                payload = ar.get(timeout=settings.celery_task_timeout, propagate=True)
+                result = check_result_from_dict(payload)
+            except Exception as e:
+                result = CheckResult(
+                    site=site.name,
+                    status=Status.ERROR,
+                    url=site.url.replace(
+                        "{username}",
+                        transform_identifier(site.name, identity_type, username),
+                    ),
+                    url_main=site.url_main,
+                    tags=list(site.tags),
+                    error=type(e).__name__,
+                )
+            yield result

@@ -220,5 +220,34 @@ class Settings(BaseSettings):
     # TinEye supports the same query-string protocol.
     reverse_image_tineye_template: str = "https://tineye.com/search?url={url}"
 
+    # Phase 8a: distributed worker fleet via Celery + Redis.
+    #
+    # When ``use_celery`` is 1 the per-site ``check_site`` call is fanned
+    # out via a Celery group instead of an in-process asyncio worker
+    # pool. The API process keeps the SSE stream open and yields each
+    # task's result back to the operator as soon as it lands in the
+    # result backend. Default 0 — HF Space's single-container deployment
+    # keeps the in-process path so it does not require a separate
+    # broker. Operators who set ``RECKORA_USE_CELERY=1`` are expected to
+    # have a Redis broker reachable via ``celery_broker_url`` and one or
+    # more workers running ``celery -A app.tasks worker``. The flag is
+    # read at request time (not process start) so flipping the env and
+    # reloading is enough to switch back to the in-process path.
+    use_celery: int = 0
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_result_backend: str = "redis://localhost:6379/1"
+    # Per-task timeout. A worker that exceeds this is killed and the
+    # task transitions to FAILURE; the API-side collector synthesises an
+    # ERROR ``CheckResult`` for that site so the SSE stream stays
+    # consistent with the in-process path. 30s sits comfortably above
+    # the worst-case per-site budget (verify + extract + phash ~= 12s).
+    celery_task_timeout: float = 30.0
+    # Polling interval used by the API-side collector to poll
+    # ``AsyncResult.ready()`` on each in-flight task. Smaller values
+    # reduce per-result tail latency at the cost of CPU on the API
+    # process; 25 ms is a reasonable default given typical per-site
+    # check latency is in the 200-2000 ms range.
+    celery_poll_interval: float = 0.025
+
 
 settings = Settings()

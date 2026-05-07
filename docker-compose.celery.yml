@@ -1,0 +1,65 @@
+# Phase 8a: opt-in distributed worker fleet for local development.
+#
+# Default Reckora deployment (HF Space single container) keeps the
+# in-process asyncio fan-out and never starts these services. Operators
+# who want to test the Celery path locally can run::
+#
+#     docker compose -f docker-compose.celery.yml up --build
+#
+# This brings up a Redis broker + 2 Celery workers + 1 API container
+# wired together. Flip ``RECKORA_USE_CELERY=1`` on the API service
+# (already set below) and the SSE stream will fan tasks out to the
+# workers instead of running them inline.
+#
+# Acceptance target (Phase 8a): 100-site scan p95 with 2 workers under
+# 60% of the single-process baseline; 500-site scan stays under 120 s
+# p95. See ROADMAP.md Phase 8a for the full design + tradeoffs.
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      RECKORA_CELERY_BROKER_URL: redis://redis:6379/0
+      RECKORA_CELERY_RESULT_BACKEND: redis://redis:6379/1
+      # Workers do not serve SSE; they only execute ``check_site`` tasks.
+      # ``--concurrency=4`` matches a typical 4-vCPU dev box; tune to
+      # ``2 * vcpus`` in production. ``-Ofair`` distributes long-running
+      # site probes evenly across workers instead of front-loading the
+      # first one.
+    command: >
+      sh -c "cd backend && uv sync --extra scale --frozen &&
+             uv run --extra scale celery -A app.tasks worker --loglevel=info --concurrency=4 -Ofair"
+    deploy:
+      replicas: 2
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "7860:7860"
+    environment:
+      RECKORA_USE_CELERY: "1"
+      RECKORA_CELERY_BROKER_URL: redis://redis:6379/0
+      RECKORA_CELERY_RESULT_BACKEND: redis://redis:6379/1
