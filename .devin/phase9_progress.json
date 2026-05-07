@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-05-07T05:45:00Z",
+  "last_updated": "2026-05-07T05:25:00Z",
   "session": {
     "devin_session_url": "https://app.devin.ai/sessions/bb4783634e7f4a6788ec51e61926a8eb",
     "git_author": "yowanda <yodadwi4@gmail.com>",
@@ -9,12 +9,12 @@
   },
   "repo": {
     "url": "https://github.com/yowanda/Reckora",
-    "head": "3d75879",
+    "head": "ecbebef",
     "live_demo": "https://yesmyyt-cacadoxx.hf.space"
   },
   "test_baseline": {
-    "default_dev_extra": "466 passed + 7 skipped",
-    "with_scale_and_gql_extras": "473 passed (with RECKORA_TEST_REDIS_URL set)",
+    "default_dev_extra": "484 passed + 7 skipped",
+    "with_scale_and_gql_extras": "491 passed (with RECKORA_TEST_REDIS_URL set)",
     "mypy_source_files": 32
   },
   "phases": {
@@ -50,7 +50,27 @@
         ".github/workflows/ci.yml (redis service container)"
       ]
     },
-    "9c": {"title": "geo-aware proxy selection", "residual_risk_closed": ["M2"], "status": "pending"},
+    "9c": {
+      "title": "geo-aware proxy selection",
+      "residual_risk_closed": ["M2 (round-robin pool ignores region locks; MEDIUM)"],
+      "status": "shipped",
+      "feat_commit": "ecbebef",
+      "feat_commit_url": "https://github.com/yowanda/Reckora/commit/ecbebef",
+      "docs_commit": null,
+      "docs_commit_url": null,
+      "ci_status": "green (backend + frontend + e2e Playwright) on feat commit",
+      "tests_added": 18,
+      "summary": "Region-tagged RECKORA_PROXY_POOL_URLS parser (`<region>:<url>` syntax), per-site site_overrides.<name>.preferredRegion override, three-pass ProxyPool.acquire(preferred_region=...) dispatch (region match -> default region -> any healthy URL fallback chain), 30s in-process site-name->region cache, internal X-Reckora-Site-Name routing header set by checker + stripped at egress so it never leaks over the wire, new admin knob enable_geo_aware_proxy (default 0), /api/health.proxy_pool.geo_distribution surface",
+      "key_files": [
+        "backend/app/proxy_pool.py (region tag parser, three-pass acquire, region cache, geo_distribution)",
+        "backend/app/transport.py (RotatingProxyTransport reads X-Reckora-Site-Name header + strips it at egress)",
+        "backend/app/checker.py (sets X-Reckora-Site-Name header on every probe)",
+        "backend/app/site_overrides.py (preferredRegion in _ALLOWED_PATCH_KEYS)",
+        "backend/app/config.py (enable_geo_aware_proxy field)",
+        "backend/app/admin_settings.py (1 new KnobSpec)",
+        "backend/tests/test_proxy_pool_geo.py (new, 18 tests)"
+      ]
+    },
     "9d": {"title": "CAPTCHA classifier + structured UNKNOWN labelling", "residual_risk_closed": ["M3"], "status": "pending"},
     "9e": {"title": "quarterly catalog auto-refresh from upstream maigret", "residual_risk_closed": ["M4"], "status": "pending"},
     "9f": {"title": "per-scan hard budget with new SKIPPED bucket", "residual_risk_closed": ["M5"], "status": "pending"},
@@ -58,8 +78,8 @@
     "9h": {"title": "HF Space keep-warm cron", "residual_risk_closed": ["M7"], "status": "pending"}
   },
   "active_batch": {
-    "phase": "9c",
-    "next_action": "Implement Phase 9c geo-aware proxy selection: GeoIP2 lookup of proxy egress IPs + per-site geo affinity (e.g. site_overrides.<name>.preferredRegion = 'us|eu|jp'), 'closest' / 'cheapest' / 'random' selection mode, /api/health.proxy_pool.geo_distribution surface, ~12 backend tests. Use feat -> CI -> docs -> report pattern. Closes residual-risk M2.",
+    "phase": "9d",
+    "next_action": "Implement Phase 9d CAPTCHA classifier + structured UNKNOWN labelling: train a tiny ONNX classifier on response body sniffs (rate-limit page, CAPTCHA challenge page, soft-block, transient 5xx) so a probe that today returns Status.ERROR with a generic 'http_error' string surfaces a structured BLOCKED reason instead. Closes residual-risk M3 (UNKNOWN bucket is too coarse to triage).",
     "blocking": false
   },
   "rules": {

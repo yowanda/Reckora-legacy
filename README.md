@@ -43,7 +43,7 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 6 — accuracy & gap closure vs maigret | shipped (4/4: 6a, 6b, 6c, 6d) | **2,506** (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
 | 7 — intel & enrichment | shipped 4/4 (**7a** pHash + **7b** WHOIS/HIBP + **7c** reverse-image + **7d** ML retrain + drift) | 2,506+ | 0–100 + ML retrainable | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image/ML drift |
 | 8 — scale & infra | shipped (4/4: 8a Celery+Redis, 8b proxy rotator, 8c GraphQL gateway, 8d public-scan edge cache; deployed `0551938 → 5723927`) | 2,506 | 0–100 + ML | yes (distributed worker fleet, opt-in) | yes | yes | yes (rotating proxy pool, opt-in) | yes | yes |
-| 9 — anti-bot probe + scale-out reliability | in-flight (2/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; 9c–9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via 9e | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware via 9c; CAPTCHA classifier via 9d) | yes | yes |
+| 9 — anti-bot probe + scale-out reliability | in-flight (3/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; **9c** geo-aware proxy selection shipped — `ecbebef`; 9d–9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via 9e | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware proxy selection via **9c — shipped**; CAPTCHA classifier via 9d) | yes | yes |
 
 > [`ROADMAP.md`](./ROADMAP.md) is the **single source of truth** for what's
 > in flight + planned. The "Live status" header at the top of the roadmap is
@@ -96,9 +96,23 @@ against live HF Space, and is benchmarked here with concrete numbers.
 > one bucket per host, closing residual-risk **M1**
 > (per-process token bucket; **MEDIUM**); opt-in via the
 > `host_rate_limit_use_redis` admin knob with fail-open fallback
-> to the in-memory bucket on Redis transport error. The
-> remaining 6 sub-phases (9c–9h) cover geo-aware proxy
-> selection, CAPTCHA classifier + structured `UNKNOWN`
+> to the in-memory bucket on Redis transport error.
+> **9c (geo-aware proxy selection) is shipped** (`ecbebef`):
+> the Phase 8b `proxy_pool` learns a `region:url` syntax on
+> `RECKORA_PROXY_POOL_URLS` plus a per-site
+> `site_overrides.<name>.preferredRegion` tag, and the
+> `RotatingProxyTransport._select_proxy` consults the site
+> override (via the internal `X-Reckora-Site-Name` request
+> header) and threads the preferred region through to a
+> three-pass `acquire(preferred_region=...)` (region match →
+> default region → any healthy URL) so a Yandex / VK probe
+> exits through a regional proxy when one is available and
+> falls back through `default` then any healthy URL when not
+> — closing residual-risk **M2** (round-robin pool ignores
+> region locks; **MEDIUM**). Opt-in via the
+> `enable_geo_aware_proxy` admin knob; default 0 preserves the
+> Phase 8b round-robin behaviour byte-for-byte. The remaining
+> 5 sub-phases (9d–9h) cover CAPTCHA classifier + structured `UNKNOWN`
 > labelling, quarterly catalog auto-refresh from upstream
 > maigret, per-scan hard budget with a new `SKIPPED` bucket,
 > proxy reputation warm-up / weighted selection, and an HF
