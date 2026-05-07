@@ -4,6 +4,11 @@ Tests run with ``task_always_eager=True`` so they exercise the real
 ``check_site_task`` body without needing a Redis broker. ``pytest-httpx``
 mocks the upstream HTTP fetches the task issues against a synthetic
 site catalog.
+
+The whole module is skipped when the optional ``[scale]`` extra is not
+installed — the in-process path remains the default, so a developer
+without celery can still run the rest of the suite. CI installs
+``.[dev,scale]`` so the celery path is always covered.
 """
 
 from __future__ import annotations
@@ -13,16 +18,24 @@ from typing import Any
 
 import pytest
 
-from app import tasks as tasks_mod
-from app.checker import (
+pytest.importorskip(
+    "celery",
+    reason="install backend extras [scale] (celery + redis) to run Phase 8a tests",
+)
+
+# Imports below the ``importorskip`` gate intentionally trigger E402;
+# ruff is silenced because moving them above the gate would crash module
+# collection on a [scale]-less install.
+from app import tasks as tasks_mod  # noqa: E402
+from app.checker import (  # noqa: E402
     CheckResult,
     Status,
     check_result_from_dict,
     stream_checks,
     stream_checks_via_celery,
 )
-from app.sites import Site, SiteCatalog
-from tests._phase_5h import _force_admin_int
+from app.sites import Site, SiteCatalog  # noqa: E402
+from tests._phase_5h import _force_admin_int  # noqa: E402
 
 
 def _site(**overrides: Any) -> Site:
