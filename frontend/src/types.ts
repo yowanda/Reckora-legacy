@@ -7,7 +7,22 @@ export type Status = 'claimed' | 'free' | 'unknown' | 'blocked' | 'error' | 'ski
 // pair on every search request.
 // ---------------------------------------------------------------------------
 
-export type IdentityType = 'username' | 'email' | 'phone' | 'gaia' | 'yandex' | 'skype'
+export type IdentityType =
+  | 'username'
+  | 'email'
+  | 'phone'
+  | 'gaia'
+  | 'yandex'
+  | 'skype'
+  // Phase 10c: numeric / opaque per-platform identifiers, mirrored from
+  // ``backend/app/identity.py``. The picker swaps placeholder + pattern
+  // automatically; the backend re-validates via ``is_valid_identifier``.
+  | 'vk_id'
+  | 'ok_id'
+  | 'steam_id'
+  | 'wikimapia_uid'
+  | 'uidme_uguid'
+  | 'yelp_userid'
 
 // ---------------------------------------------------------------------------
 // Phase 5g: scan depth (how many sites a single search probes).
@@ -73,6 +88,12 @@ export const IDENTITY_TYPES: readonly IdentityType[] = [
   'gaia',
   'yandex',
   'skype',
+  'vk_id',
+  'ok_id',
+  'steam_id',
+  'wikimapia_uid',
+  'uidme_uguid',
+  'yelp_userid',
 ] as const
 
 export interface IdentityTypeMeta {
@@ -125,6 +146,51 @@ export const IDENTITY_TYPE_META: Record<IdentityType, IdentityTypeMeta> = {
     placeholder: 'enter a Skype name, e.g. live:johndoe',
     pattern: '^(?:live:)?[A-Za-z0-9_.\\-]{6,32}$',
     hint: 'Skype name — 6-32 chars, optional ``live:`` prefix',
+  },
+  // Phase 10c: maigret-parity identity types. Patterns mirror the
+  // ``_VK_ID_RE`` / ``_OK_ID_RE`` / ``_STEAM_ID_RE`` etc. constants in
+  // ``backend/app/identity.py``.
+  vk_id: {
+    key: 'vk_id',
+    label: 'VK id',
+    placeholder: 'enter a VK numeric id, e.g. 270433952',
+    pattern: '^[1-9][0-9]{0,10}$',
+    hint: 'VK numeric id — 1 to 11 digits, no leading zero',
+  },
+  ok_id: {
+    key: 'ok_id',
+    label: 'OK id',
+    placeholder: 'enter an Odnoklassniki numeric id',
+    pattern: '^[1-9][0-9]{8,17}$',
+    hint: 'Odnoklassniki numeric id — 9 to 18 digits',
+  },
+  steam_id: {
+    key: 'steam_id',
+    label: 'Steam id',
+    placeholder: 'enter a SteamID64 (76561197…) or STEAM_0:0:11101',
+    pattern: '^(?:7656119[0-9]{10}|STEAM_[01]:[01]:[0-9]{1,15})$',
+    hint: 'SteamID64 (17 digits, 7656119…) or legacy STEAM_X:Y:Z literal',
+  },
+  wikimapia_uid: {
+    key: 'wikimapia_uid',
+    label: 'Wikimapia uid',
+    placeholder: 'enter a Wikimapia numeric uid',
+    pattern: '^[1-9][0-9]{0,11}$',
+    hint: 'Wikimapia user id — 1 to 12 digits',
+  },
+  uidme_uguid: {
+    key: 'uidme_uguid',
+    label: 'uID.me uguid',
+    placeholder: 'enter a uID.me uguid (numeric, 6-15 digits)',
+    pattern: '^[1-9][0-9]{5,14}$',
+    hint: 'uID.me uguid — 6 to 15 digits',
+  },
+  yelp_userid: {
+    key: 'yelp_userid',
+    label: 'Yelp user id',
+    placeholder: 'enter a 22-char Yelp user id, e.g. iX_lqhcobUBvM2S671_RyA',
+    pattern: '^[A-Za-z0-9_\\-]{22}$',
+    hint: 'Yelp user id — exactly 22 chars (letters, digits, _ or -)',
   },
 }
 
