@@ -524,6 +524,66 @@ KNOBS: tuple[KnobSpec, ...] = (
             "and ``CheckResult.reason`` stays ``None``."
         ),
     ),
+    KnobSpec(
+        key="enable_scan_budget",
+        settings_attr="enable_scan_budget",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 9f: when 1, ``stream_checks`` instantiates a per-scan "
+            "``ScanBudget`` and bulk-marks remaining sites SKIPPED on three "
+            'triggers: total wall-clock exceeded (``reason="scan_total_killed"``), '
+            'per-probe timeout (``reason="probe_timeout"``), and consecutive '
+            'probe timeouts hitting the bulk-skip threshold (``reason="budget_exceeded"``). '
+            "Off by default — when off, the budget is never allocated and "
+            "the scan walk is byte-for-byte identical to the pre-9f path."
+        ),
+    ),
+    KnobSpec(
+        key="scan_max_total_sec",
+        settings_attr="scan_max_total_sec",
+        minimum=1,
+        maximum=3600,
+        description=(
+            "Phase 9f: hard wall-clock ceiling on a single scan in "
+            "seconds. Once exceeded, the budget tripper bulk-marks every "
+            'queued worker SKIPPED with ``reason="scan_total_killed"`` and '
+            "closes the SSE stream. Default 300 (= 5 min). Range 1-3600. "
+            "Only consulted when ``enable_scan_budget=1``."
+        ),
+    ),
+    KnobSpec(
+        key="scan_per_site_timeout_sec",
+        settings_attr="scan_per_site_timeout_sec",
+        minimum=1,
+        maximum=120,
+        description=(
+            "Phase 9f: ``asyncio.wait_for`` timeout wrapped around each "
+            "``check_site`` call. Separate from the ``httpx`` connect/read "
+            "timeouts because those don't include time spent inside Phase "
+            "5h verify probes / Phase 9a Playwright fallback / Phase 2.2 "
+            "curl-cffi rescue. On timeout the site emits SKIPPED with "
+            '``reason="probe_timeout"`` and the consecutive-skip counter '
+            "ticks. Default 8 sec. Range 1-120. Only consulted when "
+            "``enable_scan_budget=1``."
+        ),
+    ),
+    KnobSpec(
+        key="scan_max_concurrent_skips",
+        settings_attr="scan_max_concurrent_skips",
+        minimum=1,
+        maximum=2500,
+        description=(
+            "Phase 9f: how many consecutive probe-timeouts (without an "
+            "intervening successful probe) before the budget latches "
+            "into bulk-skip mode. After the latch every remaining worker "
+            'emits SKIPPED with ``reason="budget_exceeded"`` so the '
+            "operator can re-run only the SKIPPED rows in a second scan "
+            "instead of letting a wedged scan limp through. Default 50. "
+            "Range 1-2500 (max matches the catalog size). Only consulted "
+            "when ``enable_scan_budget=1``."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

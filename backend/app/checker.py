@@ -1178,21 +1178,82 @@ async def stream_checks(
 
         cffi_rescue = CffiRescue()
 
+    # Phase 9f: per-scan hard budget + SKIPPED bucket.
+    # ``ScanBudget.from_settings`` reads the four 9f knobs off the global
+    # settings — when ``enable_scan_budget=0`` (the default) the returned
+    # budget's ``is_enabled`` is False and every gating method below is a
+    # no-op so the worker walk stays byte-for-byte identical to the
+    # pre-9f path.
+    from . import scan_budget as scan_budget_mod
+
+    budget = scan_budget_mod.ScanBudget.from_settings(settings)
+
+    def _make_skipped(site: Site, reason: str) -> CheckResult:
+        return CheckResult(
+            site=site.name,
+            status=Status.SKIPPED,
+            url=site.url.replace(
+                "{username}",
+                transform_identifier(site.name, identity_type, username),
+            ),
+            url_main=site.url_main,
+            tags=list(site.tags),
+            reason=reason,
+        )
+
     async def worker(site: Site) -> None:
         async with sem:
+            # Phase 9f: short-circuit before doing any work when the
+            # budget has already tripped. ``should_bulk_skip()`` latches
+            # after the consecutive-timeout threshold or after the
+            # total wall-clock cap is exceeded; both reasons surface
+            # via :data:`scan_budget.REASON_*` so the SPA can render
+            # the correct badge.
+            if budget.is_enabled:
+                if budget.is_total_exceeded():
+                    budget.force_bulk_skip()
+                    await queue.put(_make_skipped(site, scan_budget_mod.REASON_SCAN_TOTAL_KILLED))
+                    return
+                if budget.should_bulk_skip():
+                    await queue.put(_make_skipped(site, scan_budget_mod.REASON_BUDGET_EXCEEDED))
+                    return
+
+            probe_timeout = budget.per_site_timeout
             try:
-                result = await check_site(
-                    client,
-                    site,
-                    username,
-                    identity_type=identity_type,
-                    prewarm_cache=prewarm_cache,
-                    prewarm_lock=prewarm_lock,
-                    verify=verify,
-                    cffi_rescue=cffi_rescue,
-                    extract=extract,
-                )
+                if probe_timeout is None:
+                    result = await check_site(
+                        client,
+                        site,
+                        username,
+                        identity_type=identity_type,
+                        prewarm_cache=prewarm_cache,
+                        prewarm_lock=prewarm_lock,
+                        verify=verify,
+                        cffi_rescue=cffi_rescue,
+                        extract=extract,
+                    )
+                else:
+                    result = await asyncio.wait_for(
+                        check_site(
+                            client,
+                            site,
+                            username,
+                            identity_type=identity_type,
+                            prewarm_cache=prewarm_cache,
+                            prewarm_lock=prewarm_lock,
+                            verify=verify,
+                            cffi_rescue=cffi_rescue,
+                            extract=extract,
+                        ),
+                        timeout=probe_timeout,
+                    )
+            except TimeoutError:
+                budget.record_skip()
+                await queue.put(_make_skipped(site, scan_budget_mod.REASON_PROBE_TIMEOUT))
+                return
             except Exception as e:
+                if budget.is_enabled:
+                    budget.record_success()
                 result = CheckResult(
                     site=site.name,
                     status=Status.ERROR,
@@ -1204,6 +1265,9 @@ async def stream_checks(
                     tags=list(site.tags),
                     error=type(e).__name__,
                 )
+            else:
+                if budget.is_enabled:
+                    budget.record_success()
             await queue.put(result)
 
     tasks = [asyncio.create_task(worker(s)) for s in sites]

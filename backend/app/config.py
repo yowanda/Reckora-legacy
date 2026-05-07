@@ -436,5 +436,33 @@ class Settings(BaseSettings):
     # admin endpoint reports an empty ``captcha_vendors_seen`` map.
     enable_captcha_classifier: int = 0
 
+    # Phase 9f: per-scan hard budget + SKIPPED bucket (closes residual
+    # risk M5 scan tail-latency runaway; MEDIUM).
+    #
+    # When ``enable_scan_budget`` is 1 the in-process scan walker
+    # instantiates a :class:`backend.app.scan_budget.ScanBudget` and
+    # gates every worker on three thresholds:
+    #
+    # * ``scan_max_total_sec`` — hard wall-clock ceiling for the whole
+    #   scan. Once exceeded, every still-queued worker emits a
+    #   :data:`backend.app.checker.Status.SKIPPED` row with
+    #   ``reason="scan_total_killed"`` and the SSE stream closes.
+    # * ``scan_per_site_timeout_sec`` — ``asyncio.wait_for`` budget
+    #   wrapped around each :func:`check_site` call. On timeout the
+    #   site emits :data:`Status.SKIPPED` with ``reason="probe_timeout"``
+    #   and the consecutive-skip counter ticks.
+    # * ``scan_max_concurrent_skips`` — once this many consecutive
+    #   probes time out (without an intervening success) the budget
+    #   latches into bulk-skip mode and the rest of the queue emits
+    #   :data:`Status.SKIPPED` with ``reason="budget_exceeded"``.
+    #
+    # Default ``enable_scan_budget=0`` preserves the pre-9f
+    # ``stream_checks`` walk byte-for-byte — no per-probe wrapping,
+    # no SKIPPED rows, no ``ScanBudget`` allocation on the hot path.
+    enable_scan_budget: int = 0
+    scan_max_total_sec: int = 300
+    scan_per_site_timeout_sec: int = 8
+    scan_max_concurrent_skips: int = 50
+
 
 settings = Settings()
