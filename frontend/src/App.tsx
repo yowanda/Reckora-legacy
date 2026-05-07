@@ -8,6 +8,7 @@ import { GraphView } from './components/GraphView'
 import { Disclaimer } from './components/Disclaimer'
 import { LoginPage } from './components/LoginPage'
 import { AdminPanel } from './components/AdminPanel'
+import { EmailEnrichmentPanel } from './components/EmailEnrichmentPanel'
 import { fetchSites, streamGraphSearch, streamPermuteSearch, streamSearch } from './api'
 import { useAuth } from './auth-context'
 import type {
@@ -95,6 +96,10 @@ function SearchView() {
   const [graphProgress, setGraphProgress] = useState<GraphProgress>(INITIAL_GRAPH)
   const [permuteProgress, setPermuteProgress] = useState<PermuteState>(INITIAL_PERMUTE)
   const [username, setUsername] = useState<string>('')
+  // Phase 7b: keep the most recent ``identity_type`` so the SPA knows
+  // when to mount the email enrichment side panel after a list-mode
+  // scan finishes.
+  const [currentIdentityType, setCurrentIdentityType] = useState<IdentityType>('username')
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -112,6 +117,7 @@ function SearchView() {
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setUsername(name)
+    setCurrentIdentityType(identityType)
     // Phase 5g: resolve the picker preset to a concrete integer the
     // backend will accept. ``'all'`` -> live catalog count, clamped to
     // the 3,000-site backend hard cap.
@@ -463,6 +469,14 @@ function SearchView() {
                   no results match the current filter.
                 </p>
               )}
+              {/* Phase 7b: WHOIS / HIBP-style enrichment panel for
+                  email-mode scans. The component itself handles the
+                  loading / disabled / error states; we just decide
+                  when to mount it. */}
+              {mode === 'list' &&
+                currentIdentityType === 'email' &&
+                progress.state === 'done' &&
+                username && <EmailEnrichmentPanel email={username} />}
             </>
           )}
         </section>

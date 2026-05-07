@@ -11,12 +11,12 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 
 | Field | Value |
 | --- | --- |
-| Repo HEAD on main | `8faf4c8` (Phase 6d — PDF export via weasyprint) |
-| HF Space HEAD | `784ac59` (mirrors main through Phase 5h-FE; Phase 6 / 7a not yet redeployed) |
-| Active batch | **Phase 7b — WHOIS / HIBP-style breach enrichment for `identity_type=email`** |
-| Last batch shipped | Phase 7a — profile-image pHash graph stitching (Pillow-only dHash + 24 tests + Playwright e2e) |
-| Last update | 2026-05-07 (Phase 7a — pHash graph stitching) |
-| Test baseline | backend pytest **271 / 271** · mypy 19 src files · ruff clean · frontend lint+build green · e2e **5 / 5** |
+| Repo HEAD on main | `92005cc` (Phase 7a — pHash graph stitching) |
+| HF Space HEAD | `784ac59` (mirrors main through Phase 5h-FE; Phase 6 / 7a / 7b not yet redeployed) |
+| Active batch | **Phase 7c — reverse-image lookup hook (Yandex / Google Lens)** |
+| Last batch shipped | Phase 7b — WHOIS / HIBP-style breach enrichment for email scans (RDAP + HIBP fetchers + 33 tests + Playwright e2e) |
+| Last update | 2026-05-07 (Phase 7b — email enrichment) |
+| Test baseline | backend pytest **304 / 304** · mypy 20 src files · ruff clean · frontend lint+build green · e2e **6 / 6** |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
 HEAD on main` and `Last update` lines are updated at the end of every batch
@@ -62,7 +62,7 @@ once `command git push origin main` returns and CI is green.
 > dimension of OSINT signal.
 
 - [x] **7a** — profile-image perceptual-hash (pHash) graph stitching (8x8 dHash via `app/imagephash.py`; admin knobs `enable_image_phash` + `image_phash_max_distance`; SPA renders dashed purple `phash_edge` between matching CLAIMED hits + `pHash matches` SidePanel stat; 24 new tests covering pure hash math, mocked HTTP fetch, SSE emission, and a Playwright e2e)
-- [ ] **7b** — WHOIS / HIBP-style breach enrichment for `identity_type=email`
+- [x] **7b** — WHOIS / HIBP-style breach enrichment for `identity_type=email` (`app/enrichment.py` runs RDAP + HIBP lookups in parallel; admin knobs `enable_email_enrichment` + `enrichment_rate_per_min`; HIBP key in env-only `enrichment_hibp_api_key`; SPA mounts `EmailEnrichmentPanel` after every list-mode email scan; 33 new tests covering parsers, rate limiter, mocked HTTP fetchers, endpoint auth/gating/rate-limit, and a Playwright e2e)
 - [ ] **7c** — reverse-image lookup hook (Yandex / Google Lens)
 - [ ] **7d** — ML reranker retrain pipeline + drift detector
 
@@ -321,15 +321,47 @@ These are non-negotiable guards I run on **every** batch before pushing to `main
   distinct edge type; admin knob `image_phash_max_distance`
   (default `6`) tunes sensitivity.
 
-### 7b — WHOIS / HIBP-style breach enrichment for `identity_type=email`
+### 7b — WHOIS / HIBP-style breach enrichment for `identity_type=email`  *(shipped)*
 
-- New `backend/app/enrichment.py` calls a configurable WHOIS provider for
-  domains discovered in CLAIMED email scans, and (admin-keyed) HIBP for
-  breach exposure.
-- Result rendered as a side panel in the SearchView when the active scan is
-  `identity_type=email`.
-- Acceptance: an email scan against a known-breached test address surfaces
-  the breach list; rate-limited (default `5/min` admin-tunable).
+- New `backend/app/enrichment.py` runs **RDAP** (the structured
+  successor to legacy WHOIS) on the email's domain and **HIBP**
+  (`/api/v3/breachedaccount/{email}`) on the address itself. Both
+  upstreams are read-only OSINT signals — no scraping, no credential
+  discovery, no private data — and run **concurrently** through
+  `asyncio.gather` so the SPA's worst-case wait is one
+  `enrichment_timeout` instead of the sum.
+- RDAP needs no API key; HIBP requires a paid key, kept env-only in
+  `Settings.enrichment_hibp_api_key` and **never** echoed by the
+  public `/api/settings` route. Missing keys disable HIBP cleanly
+  (the WHOIS half still works).
+- Per-actor sliding-window `RateLimiter` (60-second window, default
+  `5 / min` admin-tunable via `enrichment_rate_per_min`) protects
+  upstream quotas — the handler returns `HTTP 429` when the budget
+  is empty.
+- Single endpoint: `POST /api/enrich/email` (signed-in members only).
+  Always returns `200` with a `disabled` boolean so the SPA can hide
+  the panel cleanly when the admin knob is off.
+- Two admin knobs: `enable_email_enrichment` (default `0` — opt-in)
+  and `enrichment_rate_per_min` (`1-60`, default `5`).
+- Frontend mounts `EmailEnrichmentPanel` after every list-mode
+  `identity_type=email` scan finishes. The component renders a
+  WHOIS card (registrar, created/expires/updated, nameservers,
+  status) plus a breach-list card (HIBP `Breach` objects with
+  date + data-class chips). Both halves degrade independently —
+  if RDAP is down but HIBP succeeds, only the breach side renders.
+- Tests: `tests/test_enrichment.py` (33 cases) covers the RDAP /
+  HIBP parsers, the rate limiter (sliding-window eviction, per-
+  actor isolation, zero-limit edge case), the HTTP fetchers
+  driven through `httpx.MockTransport` (200 / 404 / 401 / transport
+  error / non-JSON body / missing template placeholder / missing
+  API key), and the FastAPI endpoint via `TestClient`
+  (auth-required / disabled-knob / invalid-email / happy-path /
+  rate-limit-trips). `frontend/e2e/email-enrichment.spec.ts`
+  drives the SPA through the full flow with intercepted
+  `/api/search` + `/api/enrich/email` responses.
+- Acceptance: ✅ an email scan against a stub-breached test
+  address surfaces the breach list; per-actor rate limit (default
+  `5/min`, admin-tunable to `60/min`) protects upstream quotas.
 
 ### 7c — reverse-image lookup hook
 

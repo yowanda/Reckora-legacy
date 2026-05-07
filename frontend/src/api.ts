@@ -6,6 +6,7 @@ import type {
   AdminSitesResponse,
   CheckResult,
   EffectiveSettings,
+  EnrichmentResponse,
   GraphEdge,
   GraphExtracted,
   GraphPhashEdge,
@@ -594,4 +595,18 @@ export async function streamGraphSearch(
     }
   }
   if (buffer.trim()) handleSseChunk(buffer, events)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7b: WHOIS / HIBP-style enrichment for ``identity_type=email``.
+// Always returns a 200 (the ``disabled`` field tells the SPA when to
+// hide the side panel); 429 surfaces as a thrown ``ApiError`` the
+// component renders as a "try again" message.
+// ---------------------------------------------------------------------------
+
+export async function enrichEmail(email: string): Promise<EnrichmentResponse> {
+  return jsonFetch<EnrichmentResponse>('/api/enrich/email', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  })
 }

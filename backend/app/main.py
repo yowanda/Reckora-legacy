@@ -1146,6 +1146,93 @@ async def admin_patch_settings(
 
 
 # ---------------------------------------------------------------------------
+# Phase 7b: WHOIS / HIBP-style enrichment for ``identity_type=email``.
+#
+# Default-off, opt-in via ``enable_email_enrichment``. The handler is
+# intentionally a single small wrapper around ``app.enrichment``: it
+# (a) gates on the admin knob, (b) validates the email shape using the
+# existing identity normaliser, (c) enforces a per-member sliding-
+# window rate limit, and (d) forwards the request to the parallel
+# WHOIS + HIBP fetcher. Failures degrade silently — the SPA can render
+# whichever half came back successfully.
+# ---------------------------------------------------------------------------
+
+
+class EmailEnrichmentRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+
+
+def _admin_int(key: str) -> int:
+    """Wrap ``effective_int`` with a graceful fallback for test
+    contexts where the admin DB hasn't been bootstrapped yet."""
+    try:
+        return admin_settings_mod.effective_int(key)
+    except Exception:
+        spec = admin_settings_mod.KNOBS_BY_KEY.get(key)
+        if spec is None:
+            return 0
+        return int(getattr(settings, spec.settings_attr))
+
+
+@app.post("/api/enrich/email")
+async def enrich_email_endpoint(
+    body: EmailEnrichmentRequest,
+    member: Member = Depends(current_member),
+) -> dict[str, Any]:
+    """Run WHOIS + HIBP lookups for ``body.email``.
+
+    Response shape (always 200, the ``disabled`` field tells the SPA
+    when to hide the panel):
+
+    .. code-block:: json
+
+        {
+            "disabled": false,
+            "rate_limited": false,
+            "result": {
+                "email": "alice@example.com",
+                "domain": "example.com",
+                "whois": { ... } | null,
+                "breaches": [ ... ] | null,
+                "breaches_disabled": false
+            }
+        }
+
+    A ``429`` is returned when the per-member rate budget is empty so
+    the SPA can show a "try again in a minute" toast.
+    """
+    from . import enrichment as enrichment_mod
+
+    if not _admin_int("enable_email_enrichment"):
+        return {"disabled": True, "rate_limited": False, "result": None}
+
+    raw_email = body.email.strip()
+    if not is_valid_identifier(raw_email, "email"):
+        raise HTTPException(400, "invalid email")
+    email = normalise_identifier(raw_email, "email")
+
+    rate_limit = _admin_int("enrichment_rate_per_min") or settings.enrichment_rate_per_min
+    if not enrichment_mod.GLOBAL_LIMITER.allow(member.username, limit=rate_limit):
+        raise HTTPException(429, "enrichment rate limit exceeded; retry in <60s")
+
+    timeout = settings.enrichment_timeout
+    async with httpx.AsyncClient() as client:
+        result = await enrichment_mod.enrich_email(
+            client,
+            email,
+            whois_url_template=settings.enrichment_whois_url_template,
+            hibp_url_template=settings.enrichment_hibp_url_template,
+            hibp_api_key=settings.enrichment_hibp_api_key,
+            timeout=timeout,
+        )
+    return {
+        "disabled": False,
+        "rate_limited": False,
+        "result": result.to_dict(),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Phase 4: per-member scan history.
 # ---------------------------------------------------------------------------
 

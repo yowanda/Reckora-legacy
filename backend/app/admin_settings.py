@@ -197,6 +197,38 @@ KNOBS: tuple[KnobSpec, ...] = (
             "is on."
         ),
     ),
+    KnobSpec(
+        key="enable_email_enrichment",
+        settings_attr="enable_email_enrichment",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 7b: when 1, ``POST /api/enrich/email`` runs an "
+            "RDAP lookup on the email's domain and an HIBP breach "
+            "lookup on the address (if a key is configured). The "
+            "SPA surfaces the result as a side panel after every "
+            "email-mode scan. Default off — both upstreams have "
+            "their own quota and casual list-mode operators don't "
+            "need the extra panel. The HIBP API key itself lives "
+            "in env (``RECKORA_ENRICHMENT_HIBP_API_KEY``) and is "
+            "**never** returned by the public settings route."
+        ),
+    ),
+    KnobSpec(
+        key="enrichment_rate_per_min",
+        settings_attr="enrichment_rate_per_min",
+        minimum=1,
+        maximum=60,
+        description=(
+            "Phase 7b: per-actor sliding-window rate limit "
+            "(requests / minute) on ``/api/enrich/email``. The "
+            "default of 5 lets an operator batch a handful of "
+            "emails in a row without tripping HIBP's own 1-rps "
+            "soft limit. Lower values further protect upstream "
+            "quotas; values past ~20 start risking HIBP / RDAP "
+            "rate-limiting the whole instance."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

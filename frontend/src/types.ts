@@ -395,6 +395,49 @@ export interface Member {
   created_at: number
 }
 
+// ---------------------------------------------------------------------------
+// Phase 7b: WHOIS / HIBP-style enrichment for ``identity_type=email``.
+// Mirrors ``backend/app/enrichment.py``'s ``WhoisRecord``, ``Breach`` and
+// the ``/api/enrich/email`` envelope shape.
+// ---------------------------------------------------------------------------
+
+export interface WhoisRecord {
+  domain: string
+  registrar: string | null
+  created: string | null
+  expires: string | null
+  updated: string | null
+  nameservers: string[]
+  status: string[]
+}
+
+export interface Breach {
+  name: string
+  title: string
+  domain: string | null
+  breach_date: string | null
+  added_date: string | null
+  pwn_count: number | null
+  data_classes: string[]
+  is_verified: boolean
+  is_fabricated: boolean
+  is_sensitive: boolean
+}
+
+export interface EnrichmentResult {
+  email: string
+  domain: string | null
+  whois: WhoisRecord | null
+  breaches: Breach[] | null
+  breaches_disabled: boolean
+}
+
+export interface EnrichmentResponse {
+  disabled: boolean
+  rate_limited: boolean
+  result: EnrichmentResult | null
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {

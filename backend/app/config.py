@@ -143,5 +143,46 @@ class Settings(BaseSettings):
     # blocking part of the claim verification.
     image_phash_timeout: float = 3.0
 
+    # Phase 7b: WHOIS / HIBP-style breach enrichment for email scans.
+    #
+    # When ``enable_email_enrichment`` is 1, the SPA's email scan
+    # surfaces a side panel that calls ``POST /api/enrich/email``;
+    # the handler runs an RDAP lookup on the email's domain and an
+    # HIBP breach lookup on the address (if an API key is
+    # configured). Both lookups are read-only, key-or-keyless OSINT
+    # signals — they do not bypass authentication, scrape private
+    # data, or attempt credential discovery. Default off because
+    # the upstream APIs have their own quota / API-key limits and
+    # casual list-mode operators don't need the extra side panel.
+    enable_email_enrichment: int = 0
+    # Per-actor sliding-window rate limit (requests / minute) so a
+    # member can't accidentally drain the upstream API quota by
+    # mashing the enrichment button.
+    enrichment_rate_per_min: int = 5
+    # RDAP endpoint. ``rdap.org`` aggregates and proxies the IANA
+    # bootstrap registry across all registrars, returns structured
+    # JSON, and crucially needs no API key. Operators can swap in
+    # a private RDAP mirror if they want to avoid leaking the
+    # query domain to a third party.
+    enrichment_whois_url_template: str = "https://rdap.org/domain/{domain}"
+    # HIBP API v3. ``truncateResponse=false`` returns the full
+    # ``Breach`` objects (name, title, breachDate, dataClasses,
+    # ...). Without the explicit param the API returns just the
+    # breach names and the SPA would have to follow up with N
+    # extra GETs.
+    enrichment_hibp_url_template: str = (
+        "https://haveibeenpwned.com/api/v3/breachedaccount/{email}?truncateResponse=false"
+    )
+    # HIBP requires a paid API key in the ``hibp-api-key`` header.
+    # **Never** exposed via the public ``/api/settings`` route — only
+    # the ``/api/enrich/email`` handler reads it. Empty string
+    # disables the breach side of enrichment cleanly (the WHOIS half
+    # still works).
+    enrichment_hibp_api_key: str = ""
+    # Per-lookup timeout. Each ``enrich_email`` call runs WHOIS +
+    # HIBP concurrently with this timeout, so the SPA's worst-case
+    # wait is one ``enrichment_timeout`` and not the sum.
+    enrichment_timeout: float = 5.0
+
 
 settings = Settings()
