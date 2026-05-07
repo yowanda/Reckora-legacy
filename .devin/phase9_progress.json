@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-05-07T05:25:00Z",
+  "last_updated": "2026-05-07T06:10:00Z",
   "session": {
     "devin_session_url": "https://app.devin.ai/sessions/bb4783634e7f4a6788ec51e61926a8eb",
     "git_author": "yowanda <yodadwi4@gmail.com>",
@@ -9,7 +9,7 @@
   },
   "repo": {
     "url": "https://github.com/yowanda/Reckora",
-    "head": "ecbebef",
+    "head": "085fb95",
     "live_demo": "https://yesmyyt-cacadoxx.hf.space"
   },
   "test_baseline": {
@@ -56,9 +56,9 @@
       "status": "shipped",
       "feat_commit": "ecbebef",
       "feat_commit_url": "https://github.com/yowanda/Reckora/commit/ecbebef",
-      "docs_commit": null,
-      "docs_commit_url": null,
-      "ci_status": "green (backend + frontend + e2e Playwright) on feat commit",
+      "docs_commit": "085fb95",
+      "docs_commit_url": "https://github.com/yowanda/Reckora/commit/085fb95",
+      "ci_status": "green (backend + frontend + e2e Playwright) on both feat and docs commits",
       "tests_added": 18,
       "summary": "Region-tagged RECKORA_PROXY_POOL_URLS parser (`<region>:<url>` syntax), per-site site_overrides.<name>.preferredRegion override, three-pass ProxyPool.acquire(preferred_region=...) dispatch (region match -> default region -> any healthy URL fallback chain), 30s in-process site-name->region cache, internal X-Reckora-Site-Name routing header set by checker + stripped at egress so it never leaks over the wire, new admin knob enable_geo_aware_proxy (default 0), /api/health.proxy_pool.geo_distribution surface",
       "key_files": [
@@ -79,8 +79,17 @@
   },
   "active_batch": {
     "phase": "9d",
-    "next_action": "Implement Phase 9d CAPTCHA classifier + structured UNKNOWN labelling: train a tiny ONNX classifier on response body sniffs (rate-limit page, CAPTCHA challenge page, soft-block, transient 5xx) so a probe that today returns Status.ERROR with a generic 'http_error' string surfaces a structured BLOCKED reason instead. Closes residual-risk M3 (UNKNOWN bucket is too coarse to triage).",
-    "blocking": false
+    "next_action": "Implement Phase 9d CAPTCHA classifier + structured UNKNOWN labelling. Concrete plan (see ROADMAP.md line 103 for full spec): (1) new module backend/app/captcha_signatures.py with curated regex/selector bank for reCAPTCHA v2 (`<iframe src=\"https://www.google.com/recaptcha/api2/anchor`), reCAPTCHA v3 (script src match), hCaptcha (`<script src=\"https://hcaptcha.com/1/api.js`), Cloudflare Turnstile (`<script src=\"https://challenges.cloudflare.com/turnstile`), Datadome (`window._dd` script), AWS WAF Captcha, FunCaptcha, Geetest, generic Apache `<form action=\"/captcha\"` pattern. (2) Add `reason: str | None` field to checker.CheckResult (default None for backward compat; expose in to_dict() + GraphQL CheckResultInfo). (3) Wire detection in checker.py main probe path: when a 200-OK body matches a CAPTCHA signature, set reason='captcha_<vendor>' and force status to BLOCKED (the existing _is_blocked_body path already returns BLOCKED for the generic case; the new module produces vendor-specific reasons). (4) Per-vendor counter surfaced via /api/admin/ml/status (new `captcha_vendors_seen: {vendor: count}` field via a small in-process ring buffer in captcha_signatures._VENDOR_COUNTS). (5) ~15 new tests in tests/test_captcha_signatures.py covering each vendor signature, false-positive guards (e.g. a site that just mentions 'captcha' in a footer link should not match), the BLOCKED+reason wiring through checker.py, and the admin counter surface. Closes residual-risk M3 (silent UNKNOWN on CAPTCHA challenge; MEDIUM).",
+    "blocking": true,
+    "blocking_reason": "User reports daily quota at 16%. Pausing further commits until user confirms it is safe to proceed; checkpoint saved so the next session can pick up from here.",
+    "design_decisions_locked_in": {
+      "signature_format": "regex over response body text (fast, no DOM parser needed); per-vendor compiled regex precomputed at import time so the hot path is O(N_vendors) per probe with N_vendors~10",
+      "reason_field_design": "new optional CheckResult.reason: str|None ; default None preserves byte-for-byte compatibility with all existing callers and serialised payloads (the field appears in to_dict() but downstream consumers tolerate the new key)",
+      "detection_position": "runs *inside* the existing _is_blocked_body branch, *not* before it, so we don't accidentally upgrade a generic Cloudflare interstitial to a more specific reason if the cookie-prewarm path already would have flagged it; CAPTCHA signature match always wins over the generic body fingerprint when both fire",
+      "counter_storage": "in-process collections.Counter wrapped in a threading.Lock; reset_counts_for_tests() helper for unit tests; never persisted to disk because operators only need a 'this week' snapshot, not historical analytics (Phase 9e/9f planning may upgrade to a Redis stream)",
+      "admin_endpoint_extension": "GET /api/admin/ml/status returns the existing payload + new captcha_vendors_seen: {vendor: count} key; no new endpoint, no SPA changes (the SPA's existing reason-code rendering was already wired in Phase 6)"
+    },
+    "resume_instructions": "After user confirms quota is safe, continue from step (1) of next_action. The phase9_progress.json + ROADMAP.md + README.md are all up-to-date with 9c shipped status. Repo HEAD is 085fb95. No untracked or staged changes; safe to start 9d implementation cleanly."
   },
   "rules": {
     "default_off": "All Phase 9 admin knobs default to 0 (or empty string for URL fields) so HF Space's single-container deployment stays byte-for-byte unchanged until an operator opts in.",
