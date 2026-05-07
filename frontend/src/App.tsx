@@ -179,6 +179,8 @@ function SearchView() {
             setProgress((p) => ({ ...p, state: 'done' }))
             setPermuteProgress((p) => ({ ...p, current: null }))
           },
+          onInitialPdfReady: (e) =>
+            setProgress((p) => ({ ...p, initialPdf: e })),
           onError: (msg) => setProgress((p) => ({ ...p, state: 'error', error: msg })),
         },
       )
@@ -225,6 +227,8 @@ function SearchView() {
             setGraphProgress((g) => ({ ...g, state: 'done' }))
             setProgress((p) => ({ ...p, state: 'done' }))
           },
+          onInitialPdfReady: (e) =>
+            setProgress((p) => ({ ...p, initialPdf: e })),
           onError: (msg) => {
             setGraphProgress((g) => ({ ...g, state: 'error', error: msg }))
             setProgress((p) => ({ ...p, state: 'error', error: msg }))
@@ -248,6 +252,8 @@ function SearchView() {
           })),
         onDone: ({ cached }) =>
           setProgress((p) => ({ ...p, state: 'done', cached: !!cached })),
+        onInitialPdfReady: (e) =>
+          setProgress((p) => ({ ...p, initialPdf: e })),
         onError: (msg) => setProgress((p) => ({ ...p, state: 'error', error: msg })),
       },
     )

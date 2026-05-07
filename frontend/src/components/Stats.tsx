@@ -1,4 +1,4 @@
-import type { CheckResult, SearchProgress } from '../types'
+import type { CheckResult, InitialPdfReady, SearchProgress } from '../types'
 
 interface Props {
   progress: SearchProgress
@@ -37,6 +37,36 @@ export function Stats({ progress }: Props) {
           style={{ width: `${pct}%` }}
         />
       </div>
+      {progress.initialPdf && <InitialPdfBanner pdf={progress.initialPdf} />}
+    </div>
+  )
+}
+
+// Phase 10a: rendered the moment the backend SSE channel announces the
+// first qualifying CLAIMED hit. Gives the operator a one-click route to
+// the preliminary PDF without waiting for the full scan to drain.
+function InitialPdfBanner({ pdf }: { pdf: InitialPdfReady }) {
+  const apiBase = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
+  const downloadHref = `${apiBase}${pdf.url}`
+  return (
+    <div
+      data-testid="initial-pdf-banner"
+      className="flex flex-wrap items-center gap-3 border-t border-bg-border bg-ok/5 px-4 py-2 text-sm"
+    >
+      <span className="text-ok font-medium">First hit on {pdf.hit_site}</span>
+      <span className="text-xs text-zinc-400">
+        confidence {pdf.hit_confidence}
+        {pdf.hit_verified ? ' · verified' : ''}
+      </span>
+      <a
+        href={downloadHref}
+        download
+        target="_blank"
+        rel="noreferrer"
+        className="ml-auto inline-flex items-center rounded-md border border-ok/30 bg-ok/10 px-2.5 py-1 text-xs font-medium text-ok hover:bg-ok/20"
+      >
+        Download preliminary PDF
+      </a>
     </div>
   )
 }

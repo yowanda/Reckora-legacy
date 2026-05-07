@@ -619,6 +619,78 @@ KNOBS: tuple[KnobSpec, ...] = (
             "``enable_proxy_reputation=1``."
         ),
     ),
+    KnobSpec(
+        key="enable_initial_hit_pdf",
+        settings_attr="enable_initial_hit_pdf",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 10a: master switch for the auto-PDF preliminary "
+            "export. When ``1`` every SSE search stream wires in an "
+            "``InitialHitTracker`` that latches on the first "
+            "primary-pass CLAIMED hit clearing the configured "
+            "confidence + verify floors, renders a partial PDF from "
+            "the in-flight scan state, persists it under "
+            "``<data>/initial_pdfs/{token}.pdf``, and emits an "
+            "``initial_pdf_ready`` SSE frame. ``0`` (default) skips "
+            "the tracker entirely — no PDF, no event, no disk write."
+        ),
+    ),
+    KnobSpec(
+        key="initial_hit_min_confidence",
+        settings_attr="initial_hit_min_confidence",
+        minimum=50,
+        maximum=100,
+        description=(
+            "Phase 10a: confidence floor a CLAIMED primary-pass hit "
+            "must clear before the auto-PDF latch fires. Defaults to "
+            "``80`` to match Phase 6c's strict CLAIMED floor — the "
+            "preliminary PDF should not capture borderline signals "
+            "the operator would otherwise filter out. Range 50-100."
+        ),
+    ),
+    KnobSpec(
+        key="initial_hit_require_verify",
+        settings_attr="initial_hit_require_verify",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 10a: when ``1`` (default) the auto-PDF latch "
+            "additionally requires the result's ``verified`` flag to "
+            "be ``True`` (Phase 6b verify-pass agreement). When "
+            "``0``, a result that cleared ``initial_hit_min_confidence`` "
+            "but never went through verify (e.g. the verify pass was "
+            "skipped or unreachable) can still latch."
+        ),
+    ),
+    KnobSpec(
+        key="initial_hit_pdf_ttl_sec",
+        settings_attr="initial_hit_pdf_ttl_sec",
+        minimum=600,
+        maximum=604800,
+        description=(
+            "Phase 10a: lifetime of a persisted preliminary PDF on "
+            "disk before the hourly janitor sweep removes it. "
+            "Defaults to 24h (86400s). Range 600-604800 (10 minutes to "
+            "7 days). Operators on a shared deploy should keep this "
+            "short — the file is keyed by an unguessable token but "
+            "still leaks the scan's CLAIMED hit URL to anyone with the "
+            "token."
+        ),
+    ),
+    KnobSpec(
+        key="initial_hit_include_extras",
+        settings_attr="initial_hit_include_extras",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 10a: whether the partial PDF includes the per-site "
+            "extractor extras (avatar URL, secondary handles, ML "
+            "confidence, demote signals). ``1`` (default) gives the "
+            "operator the full picture; ``0`` strips the extras for "
+            'an at-a-glance "did we hit?" report.'
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

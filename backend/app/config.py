@@ -491,5 +491,37 @@ class Settings(BaseSettings):
     # first probe). Range 0-365.
     proxy_warmup_window_days: int = 7
 
+    # Phase 10a: auto-PDF preliminary export on initial CLAIMED hit.
+    #
+    # Master switch (``0``=off, ``1``=on). When off, the
+    # ``InitialHitTracker`` wired into every SSE search stream is a
+    # no-op — no PDF is rendered, no event is emitted, no disk is
+    # touched. Default-off so deploys can flip the feature on after
+    # verifying behaviour against the live site catalog.
+    enable_initial_hit_pdf: int = 0
+    # Confidence floor (0-100) the first CLAIMED primary-pass hit must
+    # clear before the latch fires. ``80`` matches Phase 6c's strict
+    # claimed floor — preliminary PDFs that capture an UNKNOWN-shaded
+    # signal would be misleading to the operator.
+    initial_hit_min_confidence: int = 80
+    # When ``1`` the latch additionally requires ``verified is True``
+    # (Phase 6b verify-pass agreement). Off means a result that hit
+    # the confidence floor but skipped the verify pass — for
+    # example because the engine flagged it as cached or because the
+    # verify pass couldn't reach the site — can still latch.
+    initial_hit_require_verify: int = 1
+    # Lifetime of a persisted preliminary PDF on disk before the
+    # janitor task purges it. Default 24h. Operators tuning this on a
+    # public deploy should keep it short — the file leaks the scan's
+    # CLAIMED hit URL on a path that, while unguessable, is sent to
+    # the SPA on the SSE channel and may be cached in browser
+    # history. Range 600-604800 (10 minutes - 7 days).
+    initial_hit_pdf_ttl_sec: int = 86400
+    # Whether the partial PDF includes the per-site extractor extras
+    # (avatar URL, secondary handles, ML confidence, demote signals).
+    # Useful when the operator wants the lightweight "did we hit?"
+    # report; off-the-shelf operators usually want the full picture.
+    initial_hit_include_extras: int = 1
+
 
 settings = Settings()

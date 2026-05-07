@@ -24,6 +24,7 @@ from . import admin_settings as admin_settings_mod
 from . import auth as auth_mod
 from . import exports as exports_mod
 from . import history as history_mod
+from . import initial_hit as initial_hit_mod
 from . import permutations as permutations_mod
 from . import proxy as proxy_mod
 from . import site_overrides as overrides_mod
@@ -107,6 +108,11 @@ async def _startup() -> None:
     auth_mod.seed_admin_from_env()
     # Force HMAC secret to be created/loaded eagerly so first login is fast.
     auth_mod._ensure_session_secret()
+    # Phase 10a: hourly TTL sweep over /data/initial_pdfs. The task is
+    # a no-op when the directory is empty so it's cheap to leave on
+    # even with the master switch off. Stash the handle on the app
+    # state so it isn't garbage collected mid-flight (RUF006).
+    app.state.initial_pdf_janitor = asyncio.create_task(initial_hit_mod.janitor_loop())
 
 
 # Phase 8c: mount the GraphQL gateway alongside REST. Always-on mount
@@ -512,6 +518,16 @@ async def _search_stream(
 
     started_at = history_mod.now_unix()
     collected: list[dict[str, Any]] = []
+    tracker = initial_hit_mod.InitialHitTracker(
+        context=initial_hit_mod.ScanContext(
+            scan_token=initial_hit_mod.new_scan_token(),
+            member=member.username if member is not None else "",
+            primary_username=req.username,
+            mode="list",
+            started_at=started_at,
+            sites_total=len(sites),
+        ),
+    )
     # Phase 1: HTTP/2 + connection pool. Phase 5e: optional proxy.
     async with _new_async_client() as client:
         async for result in stream_checks(
@@ -523,6 +539,14 @@ async def _search_stream(
             payload = result.to_dict()
             collected.append(payload)
             yield _sse_event("result", payload)
+            if member is not None:
+                fired = await tracker.consider(
+                    result,
+                    is_primary=True,
+                    results_so_far=collected,
+                )
+                if fired is not None:
+                    yield _sse_event("initial_pdf_ready", fired)
 
     cache.set(cache_key, collected)
     scan_id: int | None = None
@@ -630,6 +654,16 @@ async def _graph_search_stream(
     primary_results: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     discovered: dict[str, str] = {}  # child_username -> source description
+    tracker = initial_hit_mod.InitialHitTracker(
+        context=initial_hit_mod.ScanContext(
+            scan_token=initial_hit_mod.new_scan_token(),
+            member=member.username if member is not None else "",
+            primary_username=req.username,
+            mode="graph",
+            started_at=started_at,
+            sites_total=len(sites),
+        ),
+    )
 
     async with _new_async_client() as client:
         # ---- depth 0: primary scan ------------------------------------
@@ -639,6 +673,14 @@ async def _graph_search_stream(
             payload["parent_username"] = None
             primary_results.append(payload)
             yield _sse_event("result", payload)
+            if member is not None:
+                fired = await tracker.consider(
+                    result,
+                    is_primary=True,
+                    results_so_far=primary_results,
+                )
+                if fired is not None:
+                    yield _sse_event("initial_pdf_ready", fired)
             if (
                 effective_depth >= 1
                 and result.status.value == "claimed"
@@ -903,6 +945,16 @@ async def _permute_search_stream(
     started_at = history_mod.now_unix()
     collected: list[dict[str, Any]] = []
     candidates_run = 0
+    tracker = initial_hit_mod.InitialHitTracker(
+        context=initial_hit_mod.ScanContext(
+            scan_token=initial_hit_mod.new_scan_token(),
+            member=member.username if member is not None else "",
+            primary_username=req.username,
+            mode="permute",
+            started_at=started_at,
+            sites_total=len(sites),
+        ),
+    )
     async with _new_async_client() as client:
         for index, handle in enumerate(handles):
             yield _sse_event(
@@ -915,6 +967,7 @@ async def _permute_search_stream(
                 },
             )
             claimed_for_handle = 0
+            is_base_handle = handle == req.username
             async for result in stream_checks(sites, handle, client=client):
                 payload = result.to_dict()
                 payload["permutation_username"] = handle
@@ -923,6 +976,14 @@ async def _permute_search_stream(
                     claimed_for_handle += 1
                 collected.append(payload)
                 yield _sse_event("result", payload)
+                if member is not None and is_base_handle:
+                    fired = await tracker.consider(
+                        result,
+                        is_primary=True,
+                        results_so_far=collected,
+                    )
+                    if fired is not None:
+                        yield _sse_event("initial_pdf_ready", fired)
             yield _sse_event(
                 "candidate_done",
                 {
@@ -1478,6 +1539,47 @@ async def history_export(
         summary,
         results,
     )
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={
+            "content-disposition": f'attachment; filename="{filename}"',
+            "cache-control": "private, no-store",
+        },
+    )
+
+
+@app.get("/api/history/{scan_id}/initial_pdf")
+async def history_initial_pdf(
+    scan_id: str,
+    member: Member = Depends(current_member),
+) -> Response:
+    """Phase 10a: download the preliminary PDF emitted on the initial
+    CLAIMED hit.
+
+    ``scan_id`` here is the opaque token sent in the
+    ``initial_pdf_ready`` SSE frame, *not* the integer
+    ``history.scans.id``. Tokens are unguessable and bound to the
+    member that owned the originating scan via the sidecar metadata
+    written next to the PDF — a different member who somehow
+    obtained the token still gets a 404.
+
+    Returns ``404`` until the latch fires, then ``200`` with a
+    ``Content-Disposition: attachment`` filename matching the regular
+    history export pattern (``reckora-{token}-{username}-initial.pdf``).
+    """
+    meta = initial_hit_mod.read_initial_pdf_meta(scan_id)
+    if meta is None:
+        raise HTTPException(404, "preliminary PDF not available")
+    if str(meta.get("member", "")).casefold() != member.username.casefold():
+        raise HTTPException(404, "preliminary PDF not available")
+    body = initial_hit_mod.read_initial_pdf(scan_id)
+    if body is None:
+        raise HTTPException(404, "preliminary PDF not available")
+    username = str(meta.get("username") or "scan")
+    safe_username = "".join(c for c in username if c.isalnum() or c in {"-", "_", "."})
+    filename = f"reckora-{scan_id}-{safe_username or 'scan'}-initial.pdf"
+    media_type = "application/pdf" if body.startswith(b"%PDF-") else "text/html; charset=utf-8"
     return Response(
         content=body,
         media_type=media_type,

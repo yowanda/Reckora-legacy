@@ -361,6 +361,24 @@ export interface SitesResponse {
   sites: SiteSummary[]
 }
 
+// Phase 10a: synthetic SSE event emitted the first time a primary
+// CLAIMED hit clears the configured confidence + verify gates. The
+// payload carries the typed REST endpoint the SPA can offer as a
+// "download preliminary PDF" link without waiting for the full scan
+// to drain. ``url`` is server-relative; the SPA stitches it onto the
+// active API base.
+export interface InitialPdfReady {
+  type: 'initial_pdf_ready'
+  scan_id: string
+  scan_token: string
+  url: string
+  hit_site: string
+  hit_url: string
+  hit_confidence: number
+  hit_verified: boolean
+  results_count: number
+}
+
 export interface SearchProgress {
   total: number
   done: number
@@ -368,6 +386,10 @@ export interface SearchProgress {
   state: 'idle' | 'running' | 'done' | 'error'
   error?: string
   cached?: boolean
+  // Phase 10a: latched on the SSE ``initial_pdf_ready`` frame so the
+  // ``Stats`` banner can offer a download link as soon as the first
+  // qualifying hit lands. Stays set for the rest of the scan.
+  initialPdf?: InitialPdfReady
 }
 
 export interface GraphProgress {
