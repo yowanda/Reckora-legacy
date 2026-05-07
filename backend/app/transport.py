@@ -1,9 +1,10 @@
-"""Phase 8b: httpx transport that ties the proxy pool + rate limiter
-together.
+"""Phase 8b + 9a: httpx transport that ties the proxy pool + rate limiter
++ anti-bot impersonation together.
 
-This module is the thin glue between :mod:`app.proxy_pool` and
-:mod:`app.host_rate_limit` and the rest of the codebase. Every place
-that today builds an ``httpx.AsyncClient`` for outbound traffic uses
+This module is the thin glue between :mod:`app.proxy_pool`,
+:mod:`app.host_rate_limit`, :mod:`app.anti_bot_transport`, and the
+rest of the codebase. Every place that today builds an
+``httpx.AsyncClient`` for outbound traffic uses
 :func:`build_async_client` instead, which:
 
 1. Reads the per-host token bucket *before* dispatch, so a burst of
@@ -15,10 +16,16 @@ that today builds an ``httpx.AsyncClient`` for outbound traffic uses
 3. Marks the proxy URL as failed on transport errors so the next
    request skips it for ``proxy_health_cooldown_sec`` seconds.
 
-When both knobs are off (the HF Space single-container default) the
-transport is a thin pass-through over a regular ``httpx.AsyncHTTPTransport``
-with the Phase 5e single-proxy gate applied — behaviour is byte-for-byte
-identical to the pre-Phase-8b world.
+Phase 9a adds :func:`build_anti_bot_client` which stacks a
+``RotatingProxyTransport`` *outside* an
+:class:`app.anti_bot_transport.AntiBotTransport` so proxy rotation +
+TLS impersonation compose correctly. When the anti-bot pipeline is on
+the rotator's ``_transport_for`` returns the anti-bot transport for
+direct egress, and a per-proxy ``httpx.AsyncHTTPTransport`` for proxy
+egress (curl-cffi + arbitrary proxy schemes is a brittle combination,
+so the proxy hop falls back to vanilla httpx). When the anti-bot
+pipeline is off this collapses to the Phase 8b stack so HF Space's
+single-container deployment is unchanged.
 """
 
 from __future__ import annotations
@@ -57,11 +64,18 @@ class RotatingProxyTransport(httpx.AsyncBaseTransport):
         verify: bool = True,
         http2: bool = True,
         retries: int = 0,
+        direct_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._verify = verify
         self._http2 = http2
         self._retries = retries
-        self._transports: dict[str | None, httpx.AsyncHTTPTransport] = {}
+        # ``direct_transport`` lets the anti-bot stack inject an
+        # :class:`app.anti_bot_transport.AntiBotTransport` for the
+        # direct-egress hop while keeping per-proxy dispatch on
+        # vanilla httpx. ``None`` (Phase 8b default) means we build a
+        # plain ``httpx.AsyncHTTPTransport`` for direct egress too.
+        self._direct_transport = direct_transport
+        self._transports: dict[str | None, httpx.AsyncBaseTransport] = {}
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         host = request.url.host
@@ -104,10 +118,13 @@ class RotatingProxyTransport(httpx.AsyncBaseTransport):
                 return url
         return proxy_mod.proxy_url_or_none()
 
-    def _transport_for(self, proxy_url: str | None) -> httpx.AsyncHTTPTransport:
+    def _transport_for(self, proxy_url: str | None) -> httpx.AsyncBaseTransport:
         cached = self._transports.get(proxy_url)
         if cached is not None:
             return cached
+        if proxy_url is None and self._direct_transport is not None:
+            self._transports[proxy_url] = self._direct_transport
+            return self._direct_transport
         kwargs: dict[str, Any] = {
             "verify": self._verify,
             "http2": self._http2,
@@ -138,7 +155,52 @@ def build_async_client(
     """
     timeout_value = timeout if timeout is not None else settings.request_timeout
     pool_size = max_connections if max_connections is not None else settings.total_concurrency
-    transport = RotatingProxyTransport(http2=http2)
+    transport: httpx.AsyncBaseTransport
+    # Phase 9a: when the anti-bot pipeline is on, slot the
+    # AntiBotTransport in as the direct-egress hop of the rotator so
+    # proxy rotation + impersonation compose correctly. When off,
+    # behaviour collapses to the Phase 8b stack untouched.
+    from . import anti_bot_transport as anti_bot_mod
+
+    if anti_bot_mod.is_enabled():
+        anti_bot = anti_bot_mod.AntiBotTransport()
+        transport = RotatingProxyTransport(http2=http2, direct_transport=anti_bot)
+    else:
+        transport = RotatingProxyTransport(http2=http2)
+    return httpx.AsyncClient(
+        transport=transport,
+        timeout=timeout_value,
+        limits=httpx.Limits(
+            max_connections=pool_size,
+            max_keepalive_connections=pool_size,
+        ),
+        follow_redirects=follow_redirects,
+    )
+
+
+def build_anti_bot_client(
+    *,
+    timeout: float | None = None,
+    max_connections: int | None = None,
+    follow_redirects: bool = True,
+    http2: bool = True,
+    impersonation: str | None = None,
+) -> httpx.AsyncClient:
+    """Return an :class:`httpx.AsyncClient` with the Phase 9a stack
+    forced on, regardless of the admin knob.
+
+    Useful for callers (e.g. an admin smoke-test endpoint) that need
+    to exercise the impersonation path even when the runtime knob is
+    off. Production code paths should keep using
+    :func:`build_async_client` so the knob remains the source of
+    truth for ordinary scans.
+    """
+    from . import anti_bot_transport as anti_bot_mod
+
+    timeout_value = timeout if timeout is not None else settings.request_timeout
+    pool_size = max_connections if max_connections is not None else settings.total_concurrency
+    anti_bot = anti_bot_mod.AntiBotTransport(default_profile=impersonation)
+    transport = RotatingProxyTransport(http2=http2, direct_transport=anti_bot)
     return httpx.AsyncClient(
         transport=transport,
         timeout=timeout_value,

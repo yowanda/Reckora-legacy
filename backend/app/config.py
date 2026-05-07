@@ -328,5 +328,41 @@ class Settings(BaseSettings):
     # mint attempts past the cap return 409.
     share_link_max_per_scan: int = 5
 
+    # Phase 9a: anti-bot probe pipeline (closes residual risk C1
+    # Cloudflare/Akamai/Datadome JS challenge + C2 TLS / JA3 / JA4
+    # fingerprint blocking, both CRITICAL).
+    #
+    # When ``enable_anti_bot_pipeline`` is 1, every outbound site
+    # probe is dispatched via :mod:`app.anti_bot_transport` —
+    # an :class:`httpx.AsyncBaseTransport` backed by ``curl-cffi``
+    # impersonation. Combined with the Phase 8b ``RotatingProxyTransport``
+    # (which stacks *outside* the anti-bot transport), an operator
+    # gets browser-shaped TLS fingerprints across every egress IP in
+    # the proxy pool.
+    #
+    # ``anti_bot_default_impersonation`` selects the default profile
+    # — ``chrome120`` / ``chrome131`` / ``safari17`` / ``firefox120``.
+    # Unknown / mistyped values silently fall back to ``chrome120`` so
+    # a typo doesn't disable the pipeline. Per-site overrides via
+    # ``site_overrides.<name>.patch.antiBotProfile`` win over this
+    # default.
+    #
+    # ``anti_bot_playwright_fallback`` controls whether sites that
+    # *still* return a JS-challenge HTML after the curl-cffi
+    # impersonation are re-fetched through a headless chromium. Off
+    # by default because chromium has a ~200 MB image footprint and a
+    # warm-up cost — operators only flip it on when they have a
+    # custom Docker image with playwright pre-installed.
+    #
+    # ``anti_bot_playwright_max_per_scan`` is a hard ceiling on
+    # chromium spawns per scan so a worst-case 2,500-site scan can't
+    # fan out 2,500 chromium processes. ``0`` disables the fallback
+    # entirely without needing to flip the boolean knob.
+    enable_anti_bot_pipeline: int = 0
+    anti_bot_default_impersonation: str = "chrome120"
+    anti_bot_playwright_fallback: int = 0
+    anti_bot_playwright_max_per_scan: int = 5
+    anti_bot_playwright_timeout_sec: int = 10
+
 
 settings = Settings()

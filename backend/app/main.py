@@ -425,6 +425,12 @@ async def health() -> dict[str, Any]:
         "enabled": admin_settings_mod.effective_int("enable_share_links") == 1,
         "cache_max_age_sec": admin_settings_mod.effective_int("share_link_cache_max_age_sec"),
     }
+    # Phase 9a: surface anti-bot pipeline state so an operator can
+    # confirm the impersonation profile + Playwright fallback wiring
+    # without having to fire a probe at a known-WAF site.
+    from . import anti_bot_transport as anti_bot_mod
+
+    payload["anti_bot"] = anti_bot_mod.status()
     return payload
 
 

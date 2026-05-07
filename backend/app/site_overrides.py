@@ -157,6 +157,13 @@ _ALLOWED_PATCH_KEYS: frozenset[str] = frozenset(
         "engine",
         "prewarm",
         "disabled",
+        # Phase 9a: per-site impersonation profile override. Stored
+        # as a string ("chrome120" / "chrome131" / "safari17" /
+        # "firefox120"); validated against
+        # :data:`app.anti_bot_transport.SUPPORTED_IMPERSONATIONS`
+        # at resolve time so a typo silently falls back to the
+        # global default.
+        "antiBotProfile",
     }
 )
 

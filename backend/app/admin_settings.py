@@ -402,6 +402,69 @@ KNOBS: tuple[KnobSpec, ...] = (
             "owners can revoke an existing one to free a slot."
         ),
     ),
+    KnobSpec(
+        key="enable_anti_bot_pipeline",
+        settings_attr="enable_anti_bot_pipeline",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 9a: when 1, every outbound site probe is "
+            "dispatched via the curl-cffi-backed anti-bot transport "
+            "so the TLS handshake bytes (cipher suite ordering + "
+            "extension list = JA3/JA4) match a real Chrome / Safari "
+            "/ Firefox client. Stacks underneath the Phase 8b "
+            "rotating proxy transport so a deployment with both "
+            "knobs on gets browser-shaped fingerprints across every "
+            "egress IP in the pool. The default impersonation "
+            "profile is set via ``RECKORA_ANTI_BOT_DEFAULT_IMPERSONATION``; "
+            "per-site overrides via ``site_overrides.antiBotProfile``."
+        ),
+    ),
+    KnobSpec(
+        key="anti_bot_playwright_fallback",
+        settings_attr="anti_bot_playwright_fallback",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 9a: when 1, sites that still return a JS-challenge "
+            "HTML after the curl-cffi impersonation are re-fetched "
+            "through a headless chromium so the challenge JavaScript "
+            "actually runs. Off by default because chromium has a "
+            "~200 MB image footprint and a warm-up cost; only flip "
+            "on when running a custom Docker image with playwright "
+            "pre-installed. Bounded by "
+            "``anti_bot_playwright_max_per_scan`` so a 2,500-site "
+            "scan can't fan out 2,500 chromium processes."
+        ),
+    ),
+    KnobSpec(
+        key="anti_bot_playwright_max_per_scan",
+        settings_attr="anti_bot_playwright_max_per_scan",
+        minimum=0,
+        maximum=200,
+        description=(
+            "Phase 9a: hard ceiling on chromium spawns per scan when "
+            "``anti_bot_playwright_fallback`` is on. ``0`` disables "
+            "the fallback entirely without needing to flip the "
+            "boolean knob. 5 is the tuned default — enough to "
+            "rescue a few high-value Cloudflare-fronted sites per "
+            "scan without paying the chromium cost on every probe."
+        ),
+    ),
+    KnobSpec(
+        key="anti_bot_playwright_timeout_sec",
+        settings_attr="anti_bot_playwright_timeout_sec",
+        minimum=1,
+        maximum=60,
+        description=(
+            "Phase 9a: per-fetch budget (seconds) for the Playwright "
+            "fallback. Includes the chromium navigation + the "
+            "post-challenge wait for ``networkidle``. 10s is enough "
+            "for the typical Cloudflare ``Just a moment...`` "
+            "interstitial to settle while keeping the worst-case "
+            "scan tail-latency bounded."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}
