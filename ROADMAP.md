@@ -11,7 +11,7 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 
 | Field | Value |
 | --- | --- |
-| Repo HEAD on main | Phase 8a — distributed worker fleet via Celery + Redis, opt-in via `RECKORA_USE_CELERY=1`; default deployment (HF Space single container) keeps the in-process asyncio fan-out (SHA stamped by the next ROADMAP-bump commit per workflow rule §6) |
+| Repo HEAD on main | `c1f7f77` (Phase 8a — distributed worker fleet via Celery + Redis, opt-in via `RECKORA_USE_CELERY=1`; default deployment (HF Space single container) keeps the in-process asyncio fan-out; feat commit `e889a8b` shipped the runtime, ci-fix commit `c1f7f77` installed the `[scale]` extra on the backend CI job so the Phase 8a tests run) |
 | HF Space HEAD | `0551938` (mirrors main `945c6bc` — Phase 6 + Phase 7 catch-up deployed 2026-05-07; HF Space stays on the in-process path because the `[scale]` extra is opt-in; flip `RECKORA_USE_CELERY=1` + ship a Redis broker to switch to the distributed fan-out without redeploying app code) |
 | Active batch | _none — Phase 8a shipped; next default candidate is Phase 8b (rate-limit-aware proxy rotator) once an operator opts the Celery path on in production_ |
 | Last batch shipped | Phase 8a — distributed worker fleet (`backend/app/tasks.py` adds Celery `check_site_task`; `[scale]` extra pins `celery>=5.4` + `redis>=5.0`; `stream_checks` transparently dispatches to `stream_checks_via_celery` when `settings.use_celery` is set; `docker-compose.celery.yml` brings up redis + 2 workers + api locally; 7 new backend tests + 363 / 363 pytest baseline; ruff / format / mypy clean; frontend e2e 8 / 8) |
