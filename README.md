@@ -43,7 +43,7 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 6 — accuracy & gap closure vs maigret | shipped (4/4: 6a, 6b, 6c, 6d) | **2,506** (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
 | 7 — intel & enrichment | shipped 4/4 (**7a** pHash + **7b** WHOIS/HIBP + **7c** reverse-image + **7d** ML retrain + drift) | 2,506+ | 0–100 + ML retrainable | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image/ML drift |
 | 8 — scale & infra | shipped (4/4: 8a Celery+Redis, 8b proxy rotator, 8c GraphQL gateway, 8d public-scan edge cache; deployed `0551938 → 5723927`) | 2,506 | 0–100 + ML | yes (distributed worker fleet, opt-in) | yes | yes | yes (rotating proxy pool, opt-in) | yes | yes |
-| 9 — anti-bot probe + scale-out reliability | in-flight (1/8: **9a** anti-bot probe pipeline shipped — `b911a72`; 9b–9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via 9e | 0–100 + ML | yes (distributed rate limit via 9b) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware via 9c; CAPTCHA classifier via 9d) | yes | yes |
+| 9 — anti-bot probe + scale-out reliability | in-flight (2/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; 9c–9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via 9e | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware via 9c; CAPTCHA classifier via 9d) | yes | yes |
 
 > [`ROADMAP.md`](./ROADMAP.md) is the **single source of truth** for what's
 > in flight + planned. The "Live status" header at the top of the roadmap is
@@ -88,15 +88,23 @@ against live HF Space, and is benchmarked here with concrete numbers.
 > challenge HTML, both opt-in via `enable_anti_bot_pipeline=1` —
 > closing residual-risk **C1** (Cloudflare / Akamai / Datadome JS
 > challenge) and **C2** (TLS / JA3 / JA4 fingerprint blocking),
-> both **CRITICAL** in the Phase 8 deploy debrief. The remaining
-> 7 sub-phases (9b–9h) cover distributed rate-limit coordination
-> across Celery workers, geo-aware proxy selection, CAPTCHA
-> classifier + structured `UNKNOWN` labelling, quarterly catalog
-> auto-refresh from upstream maigret, per-scan hard budget with a
-> new `SKIPPED` bucket, proxy reputation warm-up / weighted
-> selection, and an HF Space keep-warm cron. Each Phase 9 sub-
-> phase carries the residual-risk ID it closes (`C1`, `C2`, `M1`–`M7`
-> from the Phase 8 deploy debrief) and is detailed in
+> both **CRITICAL** in the Phase 8 deploy debrief.
+> **9b (distributed host rate limit) is shipped** (`b6073af`):
+> a Redis-backed sliding-window counter — single atomic Lua
+> script for the `INCR + EXPIRE + check` round-trip — replaces
+> Phase 8b's per-process token bucket so N Celery workers share
+> one bucket per host, closing residual-risk **M1**
+> (per-process token bucket; **MEDIUM**); opt-in via the
+> `host_rate_limit_use_redis` admin knob with fail-open fallback
+> to the in-memory bucket on Redis transport error. The
+> remaining 6 sub-phases (9c–9h) cover geo-aware proxy
+> selection, CAPTCHA classifier + structured `UNKNOWN`
+> labelling, quarterly catalog auto-refresh from upstream
+> maigret, per-scan hard budget with a new `SKIPPED` bucket,
+> proxy reputation warm-up / weighted selection, and an HF
+> Space keep-warm cron. Each Phase 9 sub-phase carries the
+> residual-risk ID it closes (`C1`, `C2`, `M1`–`M7` from the
+> Phase 8 deploy debrief) and is detailed in
 > [`ROADMAP.md`](./ROADMAP.md).
 
 ### Phase 5 — operator polish (8/8 sub-phases shipped)
