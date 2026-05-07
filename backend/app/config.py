@@ -143,6 +143,27 @@ class Settings(BaseSettings):
     # blocking part of the claim verification.
     image_phash_timeout: float = 3.0
 
+    # Phase 10b: catalog parity / tentative-sites opt-in.
+    #
+    # ``scripts/build_sites.py`` previously *trimmed* sites whose
+    # status-200 fingerprint was ambiguous (e.g. the site returns 200
+    # for any path so a username probe can't classify cleanly). The
+    # trimmed sites were dropped entirely from ``sites.json``. Phase
+    # 10b ships them with ``tentative=true`` so the operator can flip
+    # ``enable_tentative_sites=1`` for a max-recall scan when they
+    # know the precision trade-off and want the extra coverage.
+    #
+    # The default (0) preserves the pre-Phase-10b probe set byte-for-
+    # byte: ``SiteCatalog.filtered`` skips ``tentative=true`` sites,
+    # the SPA tag picker hides the ``"tentative"`` filter chip, and
+    # ``checker._confidence`` never sees a tentative-site row. When
+    # the knob is on, tentative sites are probed but their final
+    # rule-based confidence is capped at ``max_tentative_confidence``
+    # (default 70) so the Phase 5h precision floor still rejects them
+    # unless ML + verify both vouch strongly.
+    enable_tentative_sites: int = 0
+    max_tentative_confidence: int = 70
+
     # Phase 7b: WHOIS / HIBP-style breach enrichment for email scans.
     #
     # When ``enable_email_enrichment`` is 1, the SPA's email scan

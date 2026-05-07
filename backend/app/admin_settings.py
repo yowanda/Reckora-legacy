@@ -691,6 +691,40 @@ KNOBS: tuple[KnobSpec, ...] = (
             'an at-a-glance "did we hit?" report.'
         ),
     ),
+    KnobSpec(
+        key="enable_tentative_sites",
+        settings_attr="enable_tentative_sites",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 10b: master switch for sites flagged ``tentative`` "
+            "in the catalog (entries that the build-time precision "
+            "gate previously trimmed because they returned ambiguous "
+            "200s on any path). When ``0`` (default) the runtime "
+            "filters them out of every probe set so the pre-Phase-10b "
+            "behaviour is preserved byte-for-byte. When ``1`` the "
+            "operator opts into max-recall scans; tentative-site "
+            "rule-based confidence is then capped at "
+            "``max_tentative_confidence`` so the Phase 5h precision "
+            "floor still rejects them unless ML + verify both vouch "
+            "strongly."
+        ),
+    ),
+    KnobSpec(
+        key="max_tentative_confidence",
+        settings_attr="max_tentative_confidence",
+        minimum=0,
+        maximum=100,
+        description=(
+            "Phase 10b: ceiling on the rule-based confidence assigned "
+            "to a CLAIMED hit on a ``tentative=true`` site. Range "
+            "0-100; default 70. Only consulted when "
+            "``enable_tentative_sites`` is on. Setting this below "
+            "``min_claimed_confidence`` makes every tentative-site "
+            "CLAIMED automatically demote to UNKNOWN — a deliberate "
+            'configuration for "look but never trust" runs.'
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}
