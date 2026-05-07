@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { CheckResult, Status } from '../types'
+import { ReverseImageChips } from './ReverseImageChips'
 
 const statusMeta: Record<Status, { label: string; className: string; dot: string }> = {
   claimed: { label: 'claimed', className: 'border-ok/40 bg-ok/10 text-ok', dot: 'bg-ok' },
@@ -136,13 +137,22 @@ export function ResultCard({ r }: { r: CheckResult }) {
         <ExternalIcon className="hidden h-4 w-4 text-zinc-500 transition group-hover:text-accent sm:block" />
       </a>
       {hasExtracted && showExtracted && (
-        <div className="border-t border-bg-border bg-bg-card/50 px-3 py-2 text-xs">
-          {extractedEntries.map(([k, v]) => (
-            <div key={k} className="flex gap-2 py-0.5">
-              <span className="w-24 flex-none truncate font-mono text-zinc-500">{k}</span>
-              <span className="min-w-0 flex-1 break-all text-zinc-200">{v}</span>
-            </div>
-          ))}
+        <div className="space-y-2 border-t border-bg-border bg-bg-card/50 px-3 py-2 text-xs">
+          <div>
+            {extractedEntries.map(([k, v]) => (
+              <div key={k} className="flex gap-2 py-0.5">
+                <span className="w-24 flex-none truncate font-mono text-zinc-500">{k}</span>
+                <span className="min-w-0 flex-1 break-all text-zinc-200">{v}</span>
+              </div>
+            ))}
+          </div>
+          {/* Phase 7c: reverse-image deep-link chips. Only render
+              when the extractor surfaced an ``avatar_url`` for this
+              hit; the chip component itself handles the
+              ``enable_reverse_image`` admin gate. */}
+          {typeof r.extracted?.avatar_url === 'string' && r.extracted.avatar_url && (
+            <ReverseImageChips imageUrl={r.extracted.avatar_url} />
+          )}
         </div>
       )}
     </div>

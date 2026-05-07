@@ -1233,6 +1233,57 @@ async def enrich_email_endpoint(
 
 
 # ---------------------------------------------------------------------------
+# Phase 7c: reverse-image lookup hook.
+#
+# A pure URL-builder endpoint — the SPA POSTs the avatar URL it
+# already extracted, the backend returns ``{provider: lookup_url}``
+# pairs, and the SPA renders click-to-open chips. The reason this
+# isn't done entirely in the browser is operator policy: the admin
+# knob ``enable_reverse_image`` should fully suppress the chip row
+# (some operators don't want their team deep-linking into upstream
+# trackers), and admin-supplied template overrides should take
+# effect without the SPA having to refetch ``/api/settings``.
+# ---------------------------------------------------------------------------
+
+
+class ReverseImageRequest(BaseModel):
+    image_url: str = Field(min_length=4, max_length=2048)
+
+
+@app.post("/api/reverse-image")
+async def reverse_image_endpoint(
+    body: ReverseImageRequest,
+    member: Member = Depends(current_member),
+) -> dict[str, Any]:
+    """Return ``{disabled, providers}`` for an avatar URL.
+
+    ``providers`` is a list of ``{slug, label, url}`` dicts the SPA
+    renders as a chip row under the result card. Empty when the
+    knob is off, the URL is unsafe, or every template was disabled.
+    """
+
+    from .reverseimage import PROVIDERS, build_lookup_urls, is_lookupable_url
+
+    if not _admin_int("enable_reverse_image"):
+        return {"disabled": True, "providers": []}
+
+    image_url = body.image_url.strip()
+    if not is_lookupable_url(image_url):
+        raise HTTPException(400, "image_url must be http(s)://")
+
+    templates = {
+        "yandex": settings.reverse_image_yandex_template,
+        "google": settings.reverse_image_google_template,
+        "tineye": settings.reverse_image_tineye_template,
+    }
+    urls = build_lookup_urls(image_url, templates=templates)
+    providers = [
+        {"slug": p.slug, "label": p.label, "url": urls[p.slug]} for p in PROVIDERS if p.slug in urls
+    ]
+    return {"disabled": False, "providers": providers}
+
+
+# ---------------------------------------------------------------------------
 # Phase 4: per-member scan history.
 # ---------------------------------------------------------------------------
 

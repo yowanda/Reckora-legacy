@@ -41,7 +41,7 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 4 — beyond maigret | shipped | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes | **yes (ONNX) + admin live DB editor + scan-history diff** |
 | 5 — operator polish | shipped (8/8: 5a–5h incl. 5h-A–E + 5h-FE + 5h-deploy) | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes (depth admin-tunable) | yes |
 | 6 — accuracy & gap closure vs maigret | shipped (4/4: 6a, 6b, 6c, 6d) | **2,506** (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
-| 7 — intel & enrichment | shipped 2/4 (**7a** pHash + **7b** WHOIS/HIBP) + 7c–7d planned | 2,506+ | 0–100 + ML retrained | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image |
+| 7 — intel & enrichment | shipped 3/4 (**7a** pHash + **7b** WHOIS/HIBP + **7c** reverse-image) + 7d planned | 2,506+ | 0–100 + ML retrained | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image |
 | 8 — scale & infra | planned ([ROADMAP](./ROADMAP.md)) | 3,000+ | 0–100 + ML | yes (distributed worker fleet) | yes | yes | yes (rotating proxy) | yes | yes |
 
 > [`ROADMAP.md`](./ROADMAP.md) is the **single source of truth** for what's
@@ -54,11 +54,14 @@ against live HF Space, and is benchmarked here with concrete numbers.
 > dead links); Phase 6 closed the coverage gap with `soxoj/maigret` (sites
 > regen, engine-aware probes, head-to-head benchmark, PDF export). Phase 7
 > is in flight — **7a** stitches CLAIMED hits whose profile-image perceptual
-> hashes match closely as a distinct edge type in the graph view, and **7b**
+> hashes match closely as a distinct edge type in the graph view, **7b**
 > bolts a WHOIS / HIBP-style enrichment side panel onto every email-mode
 > scan (RDAP for the domain, HIBP for breach exposure when an admin key
-> is configured), opening new dimensions of OSINT signal beyond maigret.
-> Phase 8 makes the platform horizontally scalable.
+> is configured), and **7c** adds a one-click reverse-image lookup
+> chip row (Yandex / Google Lens / TinEye) under any CLAIMED hit
+> whose extractor surfaced an avatar URL. Together they open new
+> dimensions of OSINT signal beyond maigret. Phase 8 makes the
+> platform horizontally scalable.
 
 ### Phase 5 — operator polish (8/8 sub-phases shipped)
 

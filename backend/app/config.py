@@ -184,5 +184,27 @@ class Settings(BaseSettings):
     # wait is one ``enrichment_timeout`` and not the sum.
     enrichment_timeout: float = 5.0
 
+    # Phase 7c: reverse-image lookup hooks.
+    #
+    # When ``enable_reverse_image`` is 1, every CLAIMED hit whose
+    # extractor pass produced an ``avatar_url`` gains a small row of
+    # provider chips in the SPA (Yandex / Google Lens / TinEye) that
+    # deep-link to the upstream's "search-by-image-URL" landing page
+    # in a new tab. No backend HTTP call is made — the SPA simply
+    # builds the URL client-side from the extracted ``avatar_url``
+    # plus the templates below. Each provider is a public, free,
+    # no-API-key endpoint. Default on because there's no upstream
+    # quota cost (the SPA never calls these endpoints itself; the
+    # operator's browser does, on click). Admins can disable the row
+    # entirely or swap in a private mirror.
+    enable_reverse_image: int = 1
+    # ``{url}`` is replaced with the URL-encoded ``avatar_url``.
+    # Yandex Images: <https://yandex.com/images/search?rpt=imageview>.
+    reverse_image_yandex_template: str = "https://yandex.com/images/search?rpt=imageview&url={url}"
+    # Google Lens accepts an image URL via ``uploadbyurl``.
+    reverse_image_google_template: str = "https://lens.google.com/uploadbyurl?url={url}"
+    # TinEye supports the same query-string protocol.
+    reverse_image_tineye_template: str = "https://tineye.com/search?url={url}"
+
 
 settings = Settings()

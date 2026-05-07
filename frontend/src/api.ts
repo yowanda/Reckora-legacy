@@ -14,6 +14,7 @@ import type {
   Member,
   ProxyStatus,
   PublicSettingsResponse,
+  ReverseImageResponse,
   Role,
   ScanDetail,
   ScanDiff,
@@ -608,5 +609,21 @@ export async function enrichEmail(email: string): Promise<EnrichmentResponse> {
   return jsonFetch<EnrichmentResponse>('/api/enrich/email', {
     method: 'POST',
     body: JSON.stringify({ email }),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7c: reverse-image lookup hook. Returns ``{disabled, providers}``
+// for an avatar URL the SPA already has from the extractor pass; the
+// component renders chips that ``window.open`` the upstream URL in a
+// new tab. No upstream HTTP call is made by the backend.
+// ---------------------------------------------------------------------------
+
+export async function reverseImageLookup(
+  imageUrl: string,
+): Promise<ReverseImageResponse> {
+  return jsonFetch<ReverseImageResponse>('/api/reverse-image', {
+    method: 'POST',
+    body: JSON.stringify({ image_url: imageUrl }),
   })
 }

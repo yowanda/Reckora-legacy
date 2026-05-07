@@ -438,6 +438,18 @@ export interface EnrichmentResponse {
   result: EnrichmentResult | null
 }
 
+// Phase 7c: reverse-image lookup hook.
+export interface ReverseImageProvider {
+  slug: string
+  label: string
+  url: string
+}
+
+export interface ReverseImageResponse {
+  disabled: boolean
+  providers: ReverseImageProvider[]
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {

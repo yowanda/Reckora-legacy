@@ -11,12 +11,12 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 
 | Field | Value |
 | --- | --- |
-| Repo HEAD on main | `92005cc` (Phase 7a — pHash graph stitching) |
-| HF Space HEAD | `784ac59` (mirrors main through Phase 5h-FE; Phase 6 / 7a / 7b not yet redeployed) |
-| Active batch | **Phase 7c — reverse-image lookup hook (Yandex / Google Lens)** |
-| Last batch shipped | Phase 7b — WHOIS / HIBP-style breach enrichment for email scans (RDAP + HIBP fetchers + 33 tests + Playwright e2e) |
-| Last update | 2026-05-07 (Phase 7b — email enrichment) |
-| Test baseline | backend pytest **304 / 304** · mypy 20 src files · ruff clean · frontend lint+build green · e2e **6 / 6** |
+| Repo HEAD on main | `f4d1ab0` (Phase 7b — WHOIS / HIBP enrichment) |
+| HF Space HEAD | `784ac59` (mirrors main through Phase 5h-FE; Phase 6 / 7a / 7b / 7c not yet redeployed) |
+| Active batch | **Phase 7d — ML reranker retrain pipeline + drift detector** |
+| Last batch shipped | Phase 7c — reverse-image lookup hook (Yandex / Google Lens / TinEye URL builder + 21 tests + Playwright e2e) |
+| Last update | 2026-05-07 (Phase 7c — reverse-image lookup) |
+| Test baseline | backend pytest **325 / 325** · mypy 21 src files · ruff clean · frontend lint+build green · e2e **7 / 7** |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
 HEAD on main` and `Last update` lines are updated at the end of every batch
@@ -63,7 +63,7 @@ once `command git push origin main` returns and CI is green.
 
 - [x] **7a** — profile-image perceptual-hash (pHash) graph stitching (8x8 dHash via `app/imagephash.py`; admin knobs `enable_image_phash` + `image_phash_max_distance`; SPA renders dashed purple `phash_edge` between matching CLAIMED hits + `pHash matches` SidePanel stat; 24 new tests covering pure hash math, mocked HTTP fetch, SSE emission, and a Playwright e2e)
 - [x] **7b** — WHOIS / HIBP-style breach enrichment for `identity_type=email` (`app/enrichment.py` runs RDAP + HIBP lookups in parallel; admin knobs `enable_email_enrichment` + `enrichment_rate_per_min`; HIBP key in env-only `enrichment_hibp_api_key`; SPA mounts `EmailEnrichmentPanel` after every list-mode email scan; 33 new tests covering parsers, rate limiter, mocked HTTP fetchers, endpoint auth/gating/rate-limit, and a Playwright e2e)
-- [ ] **7c** — reverse-image lookup hook (Yandex / Google Lens)
+- [x] **7c** — reverse-image lookup hook (Yandex / Google Lens / TinEye) (`app/reverseimage.py` builds public reverse-search landing-page URLs; admin knob `enable_reverse_image` + 3 template settings; SPA `ReverseImageChips` renders a chip row under any CLAIMED hit whose extractor pass produced an `avatar_url`; no API key, no upstream HTTP call from the backend; 21 new tests + a Playwright e2e)
 - [ ] **7d** — ML reranker retrain pipeline + drift detector
 
 ### Phase 8 — scale & infra  *(planned)*
@@ -363,13 +363,41 @@ These are non-negotiable guards I run on **every** batch before pushing to `main
   address surfaces the breach list; per-actor rate limit (default
   `5/min`, admin-tunable to `60/min`) protects upstream quotas.
 
-### 7c — reverse-image lookup hook
+### 7c — reverse-image lookup hook  *(shipped)*
 
-- For each pHash captured in 7a, expose a "reverse-search" button that opens
-  Yandex Images / Google Lens with the image URL pre-filled (no API key
-  required — uses public landing-page URL pattern).
-- Acceptance: graph node images are clickable and open the reverse-search
-  in a new tab.
+- New `backend/app/reverseimage.py` is a pure URL builder — no
+  network I/O, no API keys. It exposes three providers (Yandex
+  Images / Google Lens / TinEye), each with a configurable URL
+  template (`{url}` placeholder). The companion
+  `POST /api/reverse-image` handler validates the avatar URL,
+  rejects non-`http(s)` schemes (no `data:` / `javascript:` /
+  `file:` deep-links), and returns a `{disabled, providers}`
+  envelope so the SPA can hide the chip row when admins flip the
+  knob off.
+- One admin knob (`enable_reverse_image`, default **on**) and three
+  env-only template overrides for operators who want to swap in a
+  private mirror.
+- Frontend `ReverseImageChips` mounts inside the existing
+  extracted-fields panel (only visible when the operator clicks
+  the `↗ extracted · N` chip on a CLAIMED card). When the
+  extractor surfaced an `avatar_url`, the chip row renders three
+  `target=_blank` deep-links into each upstream's public
+  reverse-search landing page. Operator's browser hits the
+  upstream directly on click; the backend never makes the call.
+- Tests: `backend/tests/test_reverseimage.py` (21 cases) covers the
+  URL-encoder edge cases (special chars, opaque mirrors, missing
+  template, unsafe schemes), the metadata invariants (unique
+  slugs, every provider points at a real `Settings` field), and
+  the FastAPI endpoint via `TestClient` (auth-required, knob-off
+  short-circuit, three-provider happy path with embedded encoded
+  URL, `data:` URL rejection, empty `image_url` 422).
+  `frontend/e2e/reverse-image.spec.ts` drives the SPA through the
+  full flow with intercepted `/api/search` + `/api/reverse-image`,
+  asserts all three chips render, and that each link's `href`
+  embeds the URL-encoded `avatar_url` and opens in a new tab.
+- Acceptance: ✅ graph node + result-card avatars surface a
+  click-to-open chip row that lands on Yandex / Google Lens /
+  TinEye with the image URL pre-filled.
 
 ### 7d — ML reranker retrain pipeline + drift detector
 

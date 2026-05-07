@@ -229,6 +229,22 @@ KNOBS: tuple[KnobSpec, ...] = (
             "rate-limiting the whole instance."
         ),
     ),
+    KnobSpec(
+        key="enable_reverse_image",
+        settings_attr="enable_reverse_image",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 7c: when 1, render a row of reverse-image "
+            "search chips (Yandex / Google Lens / TinEye) under "
+            "every CLAIMED hit whose extractor pass produced an "
+            "``avatar_url``. Each chip deep-links into the "
+            "upstream's public 'search-by-URL' landing page in a "
+            "new tab — no API key, no upstream HTTP call from the "
+            "backend; the operator's browser hits the upstream "
+            "directly. Default on because there's no quota cost."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}
