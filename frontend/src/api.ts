@@ -292,14 +292,20 @@ export async function diffHistory(fromId: number, toId: number): Promise<ScanDif
   return jsonFetch<ScanDiff>(`/api/history/diff/${fromId}/${toId}`)
 }
 
-// Phase 5b: history export. The four formats below match
+// Phase 5b + 6d + 10h: history export. The formats below match
 // ``app.exports.ALLOWED_FORMATS`` server-side. ``downloadHistoryExport``
 // fetches the response body, drops it into an object URL, and clicks
 // a synthetic anchor — the same trick FF/Chrome use to honour the
 // ``Content-Disposition`` filename without needing to navigate.
+//
+// Phase 10h adds three maigret-parity formats so existing maigret
+// tooling can consume Reckora reports interchangeably:
+//   * ``txt``   — plain-text dossier (matches maigret ``--txt``)
+//   * ``xmind`` — XMind8 mind-map workbook for branching investigation
+//   * ``d3``    — self-contained HTML with an embedded D3 force-graph
 // ---------------------------------------------------------------------------
 
-export type ExportFormat = 'csv' | 'json' | 'markdown' | 'html'
+export type ExportFormat = 'csv' | 'json' | 'markdown' | 'html' | 'pdf' | 'txt' | 'xmind' | 'd3'
 
 export async function downloadHistoryExport(
   scanId: number,

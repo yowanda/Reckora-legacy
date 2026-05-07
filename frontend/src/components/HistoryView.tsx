@@ -15,15 +15,24 @@ import {
   type Status,
 } from '../types'
 
-// Phase 5b: visible export formats in the scan modal. Order matters
-// here — the first option ("HTML") is what most operators want
-// (browser-printable). PDF is generated client-side via the browser's
-// print dialog after opening the HTML export.
+// Phase 5b + 6d + 10h: visible export formats in the scan modal. Order
+// matters here — the first option ("HTML") is what most operators want
+// (browser-printable). PDF (Phase 6d) is server-rendered when
+// weasyprint is installed, with a graceful HTML fallback otherwise.
+// Phase 10h adds three maigret-parity formats so existing maigret
+// tooling can consume Reckora reports interchangeably:
+//   * txt   — plain-text dossier
+//   * xmind — XMind8 mind-map workbook
+//   * d3    — self-contained HTML with an embedded D3 force-graph
 const EXPORT_OPTIONS: { fmt: ExportFormat; label: string; hint: string }[] = [
   { fmt: 'html', label: 'HTML', hint: 'Browser-printable (Save as PDF via Print)' },
+  { fmt: 'pdf', label: 'PDF', hint: 'Server-rendered initial-hit dossier' },
   { fmt: 'csv', label: 'CSV', hint: 'Full results as a spreadsheet' },
   { fmt: 'json', label: 'JSON', hint: 'Raw payload for programmatic use' },
   { fmt: 'markdown', label: 'Markdown', hint: 'Compact summary for tickets/changelog' },
+  { fmt: 'txt', label: 'TXT', hint: 'Plain-text dossier (maigret --txt parity)' },
+  { fmt: 'xmind', label: 'XMind', hint: 'XMind8 mind-map workbook for branching investigation' },
+  { fmt: 'd3', label: 'D3 graph', hint: 'Self-contained HTML with a D3 force-directed graph' },
 ]
 
 /**
