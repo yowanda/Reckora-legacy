@@ -43,7 +43,7 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 6 — accuracy & gap closure vs maigret | shipped (4/4: 6a, 6b, 6c, 6d) | **2,506** (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
 | 7 — intel & enrichment | shipped 4/4 (**7a** pHash + **7b** WHOIS/HIBP + **7c** reverse-image + **7d** ML retrain + drift) | 2,506+ | 0–100 + ML retrainable | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image/ML drift |
 | 8 — scale & infra | shipped (4/4: 8a Celery+Redis, 8b proxy rotator, 8c GraphQL gateway, 8d public-scan edge cache; deployed `0551938 → 5723927`) | 2,506 | 0–100 + ML | yes (distributed worker fleet, opt-in) | yes | yes | yes (rotating proxy pool, opt-in) | yes | yes |
-| 9 — anti-bot probe + scale-out reliability | in-flight (5/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; **9c** geo-aware proxy selection shipped — `ecbebef`; **9d** CAPTCHA classifier + structured `UNKNOWN` labelling shipped — `18903bc`; **9e** quarterly catalog auto-refresh shipped — `ac9bbdf`; 9f–9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via **9e — shipped** | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware proxy selection via **9c — shipped**; CAPTCHA classifier via **9d — shipped**) | yes | yes |
+| 9 — anti-bot probe + scale-out reliability | in-flight (6/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; **9c** geo-aware proxy selection shipped — `ecbebef`; **9d** CAPTCHA classifier + structured `UNKNOWN` labelling shipped — `18903bc`; **9e** quarterly catalog auto-refresh shipped — `ac9bbdf`; **9f** per-scan hard budget + SKIPPED bucket shipped — `7dd7bfd`; 9g–9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via **9e — shipped** | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware proxy selection via **9c — shipped**; CAPTCHA classifier via **9d — shipped**; per-scan hard budget + SKIPPED bucket via **9f — shipped**) | yes | yes |
 
 > [`ROADMAP.md`](./ROADMAP.md) is the **single source of truth** for what's
 > in flight + planned. The "Live status" header at the top of the roadmap is
@@ -149,10 +149,34 @@ against live HF Space, and is benchmarked here with concrete numbers.
 > app code path — the diff classifier and renderer are imported
 > only by the cron job and by the unit tests, so the bundled
 > `sites.json` is unchanged in this commit (byte-for-byte
-> identical to the prior `main` HEAD). The remaining 3
-> sub-phases (9f–9h) cover per-scan hard budget with a new
-> `SKIPPED` bucket, proxy reputation warm-up / weighted
-> selection, and an HF Space keep-warm cron. Each Phase 9
+> identical to the prior `main` HEAD).
+> **9f (per-scan hard budget + SKIPPED bucket) is shipped**
+> (`7dd7bfd`): a new `backend/app/scan_budget.py` ships a
+> `ScanBudget` dataclass with three reason constants —
+> `scan_total_killed` / `budget_exceeded` / `probe_timeout` —
+> and the four-knob admin model (`enable_scan_budget` master
+> switch + `scan_max_total_sec` / `scan_per_site_timeout_sec` /
+> `scan_max_concurrent_skips` thresholds; defaults
+> `0 / 300 / 8 / 50` so the pre-9f scan walk is preserved
+> byte-for-byte when the master switch is off).
+> `app/checker.py::stream_checks` instantiates the budget once
+> per scan inside the in-process worker fan-out and short-
+> circuits each `worker(site)` on three triggers: total wall-
+> clock exceeded fires `reason="scan_total_killed"`, consecutive
+> probe-timeouts hitting the threshold latches into bulk-skip
+> mode and fires `reason="budget_exceeded"`, and per-probe
+> `asyncio.wait_for` timeouts fire `reason="probe_timeout"`.
+> Each trigger emits a `Status.SKIPPED` row through the
+> existing SSE channel using Phase 9d's optional
+> `CheckResult.reason` plumbing, so an SPA consumer can filter
+> for budget-skipped sites without a new event type. The
+> bulk-skip latch is one-way — once tripped, subsequent
+> successful probes do NOT disarm it (the operator re-runs
+> SKIPPED rows in a second scan instead of letting the wedged
+> first scan limp through). Closes residual-risk **M5**
+> (scan tail-latency runaway; **MEDIUM**). The remaining 2
+> sub-phases (9g–9h) cover proxy reputation warm-up / weighted
+> selection and an HF Space keep-warm cron. Each Phase 9
 > sub-phase carries the residual-risk ID it closes (`C1`, `C2`,
 > `M1`–`M7` from the Phase 8 deploy debrief) and is detailed in
 > [`ROADMAP.md`](./ROADMAP.md).
