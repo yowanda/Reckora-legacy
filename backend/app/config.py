@@ -464,5 +464,32 @@ class Settings(BaseSettings):
     scan_per_site_timeout_sec: int = 8
     scan_max_concurrent_skips: int = 50
 
+    # Phase 9g: proxy reputation warm-up + weighted selection (closes
+    # residual risk M6 round-robin pool ignores per-proxy reliability;
+    # MEDIUM).
+    #
+    # The Phase 8b ``ProxyPool`` rotates URLs strictly round-robin and
+    # the Phase 9c geo-aware extension only adds a region preference
+    # on top. A flaky proxy that intermittently times out is recycled
+    # back into the rotation as soon as its short cooldown expires
+    # so it keeps tripping host rate limits and burning probe budget
+    # on the same buckets. 9g adds a *reputation* signal — the running
+    # success ratio per URL — and biases the pool selector toward
+    # proxies with a higher ratio. New proxies get a configurable
+    # warm-up window during which they are treated as 1.0-weight
+    # regardless of failures so they can collect enough samples to be
+    # ranked fairly.
+    #
+    # Default ``enable_proxy_reputation=0`` keeps the pre-9g pool walk
+    # byte-for-byte identical — no weighted pick, no per-URL
+    # ``ProxyReputation`` allocation, no extra hot-path counter
+    # mutation on ``mark_failed`` / ``mark_success``.
+    enable_proxy_reputation: int = 0
+    # Days a freshly-seen URL stays at full warm-up weight before its
+    # recorded success ratio takes over. ``0`` disables the warm-up
+    # entirely (every URL is ranked by its recorded ratio from the
+    # first probe). Range 0-365.
+    proxy_warmup_window_days: int = 7
+
 
 settings = Settings()
