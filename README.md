@@ -43,7 +43,7 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 6 — accuracy & gap closure vs maigret | shipped (4/4: 6a, 6b, 6c, 6d) | **2,506** (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
 | 7 — intel & enrichment | shipped 4/4 (**7a** pHash + **7b** WHOIS/HIBP + **7c** reverse-image + **7d** ML retrain + drift) | 2,506+ | 0–100 + ML retrainable | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image/ML drift |
 | 8 — scale & infra | shipped (4/4: 8a Celery+Redis, 8b proxy rotator, 8c GraphQL gateway, 8d public-scan edge cache; deployed `0551938 → 5723927`) | 2,506 | 0–100 + ML | yes (distributed worker fleet, opt-in) | yes | yes | yes (rotating proxy pool, opt-in) | yes | yes |
-| 9 — anti-bot probe + scale-out reliability | in-flight (6/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; **9c** geo-aware proxy selection shipped — `ecbebef`; **9d** CAPTCHA classifier + structured `UNKNOWN` labelling shipped — `18903bc`; **9e** quarterly catalog auto-refresh shipped — `ac9bbdf`; **9f** per-scan hard budget + SKIPPED bucket shipped — `7dd7bfd`; 9g–9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via **9e — shipped** | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware proxy selection via **9c — shipped**; CAPTCHA classifier via **9d — shipped**; per-scan hard budget + SKIPPED bucket via **9f — shipped**) | yes | yes |
+| 9 — anti-bot probe + scale-out reliability | in-flight (7/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; **9c** geo-aware proxy selection shipped — `ecbebef`; **9d** CAPTCHA classifier + structured `UNKNOWN` labelling shipped — `18903bc`; **9e** quarterly catalog auto-refresh shipped — `ac9bbdf`; **9f** per-scan hard budget + SKIPPED bucket shipped — `7dd7bfd`; **9g** proxy reputation warm-up + weighted selection shipped — `2d5f4ad`; 9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via **9e — shipped** | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware proxy selection via **9c — shipped**; reputation-weighted proxy pool via **9g — shipped**; CAPTCHA classifier via **9d — shipped**; per-scan hard budget + SKIPPED bucket via **9f — shipped**) | yes | yes |
 
 > [`ROADMAP.md`](./ROADMAP.md) is the **single source of truth** for what's
 > in flight + planned. The "Live status" header at the top of the roadmap is
@@ -174,12 +174,40 @@ against live HF Space, and is benchmarked here with concrete numbers.
 > successful probes do NOT disarm it (the operator re-runs
 > SKIPPED rows in a second scan instead of letting the wedged
 > first scan limp through). Closes residual-risk **M5**
-> (scan tail-latency runaway; **MEDIUM**). The remaining 2
-> sub-phases (9g–9h) cover proxy reputation warm-up / weighted
-> selection and an HF Space keep-warm cron. Each Phase 9
-> sub-phase carries the residual-risk ID it closes (`C1`, `C2`,
-> `M1`–`M7` from the Phase 8 deploy debrief) and is detailed in
-> [`ROADMAP.md`](./ROADMAP.md).
+> (scan tail-latency runaway; **MEDIUM**).
+> **9g (proxy reputation warm-up + weighted selection) is
+> shipped** (`2d5f4ad`): a new `backend/app/proxy_reputation.py`
+> ships per-URL success / failure counters guarded by a
+> `threading.Lock`, a configurable warm-up window during which
+> a freshly-seen proxy is treated as full 1.0 weight regardless
+> of recorded outcome (so it can collect samples before its
+> ratio takes over), and a deterministic stride-scheduled
+> weighted pick that biases selection toward proxies with a
+> higher running success ratio while collapsing to exact
+> round-robin when all weights are equal — preserving the
+> Phase 8b/9c round-robin invariant byte-for-byte when
+> reputation is enabled but every proxy has the same recorded
+> ratio. `app/proxy_pool.py` extends `acquire(preferred_region=…)`
+> with a `_acquire_weighted(preferred_region)` path that
+> iterates the same Phase 9c three-pass region tier walk
+> (region match → default region → any healthy URL fallback
+> chain) but, inside each tier, calls `pick_weighted` over the
+> cooldown-eligible URLs rather than walking the round-robin
+> index — so the Phase 8b cooldown latch composes correctly
+> on top (a recently-failed URL is excluded from the candidate
+> list before the weighted pick runs, so a slumping proxy still
+> gets its short rest before it can win the next pick). Two new
+> admin knobs `enable_proxy_reputation` (default 0) +
+> `proxy_warmup_window_days` (default 7); the master switch
+> gates the entire weighted path so the default-off contract
+> keeps the Phase 8b round-robin walk + Phase 9c three-pass
+> region selection byte-for-byte identical to the pre-9g pool
+> selection. Closes residual-risk **M6** (round-robin pool
+> ignores per-proxy reliability; **MEDIUM**). The remaining
+> sub-phase (9h) covers an HF Space keep-warm cron. Each
+> Phase 9 sub-phase carries the residual-risk ID it closes
+> (`C1`, `C2`, `M1`–`M7` from the Phase 8 deploy debrief) and
+> is detailed in [`ROADMAP.md`](./ROADMAP.md).
 
 ### Phase 5 — operator polish (8/8 sub-phases shipped)
 

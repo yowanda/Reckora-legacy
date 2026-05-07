@@ -13,7 +13,7 @@
 - **Branch**: `main` (direct push, **no PRs**, never force-push)
 - **Live demo**: <https://yesmyyt-cacadoxx.hf.space> (HF Space; behind `main` HEAD until full Phase 9 deploy — see §7)
 - **Author/committer**: `yowanda <yodadwi4@gmail.com>` (NOT the default Devin author — see §1)
-- **Active phase**: 9g (9a + 9b + 9c + 9d + 9e + 9f shipped — see §3 status table)
+- **Active phase**: 9h (9a + 9b + 9c + 9d + 9e + 9f + 9g shipped — see §3 status table)
 
 Phase 9 closes residual risks from the Phase 8 deploy debrief.
 
@@ -88,13 +88,13 @@ uv run --extra dev ruff format --check .
 uv run --extra dev mypy
 
 # Pytest — choose ONE based on coverage you want:
-uv run --extra dev pytest -q                               # 551 + 7 skipped (no Redis, no GraphQL)
-uv run --extra dev --extra scale --extra gql pytest -q     # 551 + 7 skipped (Redis tests skipped without URL)
+uv run --extra dev pytest -q                               # 579 + 7 skipped (no Redis, no GraphQL)
+uv run --extra dev --extra scale --extra gql pytest -q     # 579 + 7 skipped (Redis tests skipped without URL)
 RECKORA_TEST_REDIS_URL=redis://localhost:6379 \
-  uv run --extra dev --extra scale --extra gql pytest -q   # 558 / 558 (full coverage)
+  uv run --extra dev --extra scale --extra gql pytest -q   # 586 / 586 (full coverage)
 ```
 
-The 558 / 558 baseline is the **gold standard** for any commit that touches `host_rate_limit_redis.py`. CI runs this combo via the `redis:7-alpine` service container declared in `.github/workflows/ci.yml`.
+The 586 / 586 baseline is the **gold standard** for any commit that touches `host_rate_limit_redis.py`. CI runs this combo via the `redis:7-alpine` service container declared in `.github/workflows/ci.yml`.
 
 ### CI poll command (after `git push`)
 
@@ -140,8 +140,8 @@ Expected: 3 check_runs (`backend`, `frontend`, `e2e (Playwright)`), all `status=
 | 9c | geo-aware proxy selection | M2 (MEDIUM) | shipped | [`ecbebef`](https://github.com/yowanda/Reckora/commit/ecbebef) | [`085fb95`](https://github.com/yowanda/Reckora/commit/085fb95) | 18 |
 | 9d | CAPTCHA classifier + structured UNKNOWN labelling | M3 (MEDIUM) | shipped | [`18903bc`](https://github.com/yowanda/Reckora/commit/18903bc) | [`d05fb62`](https://github.com/yowanda/Reckora/commit/d05fb62) | 26 |
 | 9e | quarterly catalog auto-refresh from upstream maigret | M4 (MEDIUM) | shipped | [`ac9bbdf`](https://github.com/yowanda/Reckora/commit/ac9bbdf) | [`47e1a23`](https://github.com/yowanda/Reckora/commit/47e1a23) | 24 |
-| 9f | per-scan hard budget with new SKIPPED bucket | M5 (MEDIUM) | shipped | [`7dd7bfd`](https://github.com/yowanda/Reckora/commit/7dd7bfd) | _pending docs commit_ | 17 |
-| 9g | proxy reputation warm-up + weighted selection | M6 (MEDIUM) | pending | — | — | — |
+| 9f | per-scan hard budget with new SKIPPED bucket | M5 (MEDIUM) | shipped | [`7dd7bfd`](https://github.com/yowanda/Reckora/commit/7dd7bfd) | [`736792b`](https://github.com/yowanda/Reckora/commit/736792b) | 17 |
+| 9g | proxy reputation warm-up + weighted selection | M6 (MEDIUM) | shipped | [`2d5f4ad`](https://github.com/yowanda/Reckora/commit/2d5f4ad) | _pending docs commit_ | 28 |
 | 9h | HF Space keep-warm cron | M7 (MEDIUM) | pending | — | — | — |
 
 ### Test baseline ratchet
@@ -155,7 +155,8 @@ Expected: 3 check_runs (`backend`, `frontend`, `e2e (Playwright)`), all `status=
 | 9d | 510 + 7 skipped | 517 (+26 tests) |
 | 9e | 534 + 7 skipped | 541 (+24 tests) |
 | 9f | 551 + 7 skipped | 558 (+17 tests) |
-| 9g (target) | ~565 + 7 skipped | ~575 (+18 tests) |
+| 9g | 579 + 7 skipped | 586 (+28 tests) |
+| 9h (target) | ~580 + 7 skipped | ~587 (+1 test smoke) |
 
 **The number must monotonically grow.** Never delete or weaken existing tests.
 
@@ -164,20 +165,20 @@ Expected: 3 check_runs (`backend`, `frontend`, `e2e (Playwright)`), all `status=
 ```json
 {
   "schema_version": 2,
-  "last_updated": "2026-05-07T07:30:00Z",
+  "last_updated": "2026-05-07T12:30:00Z",
   "session": {
     "git_author": "yowanda <yodadwi4@gmail.com>",
     "branch": "main"
   },
   "repo": {
     "url": "https://github.com/yowanda/Reckora",
-    "head": "7dd7bfd",
+    "head": "2d5f4ad",
     "live_demo": "https://yesmyyt-cacadoxx.hf.space"
   },
   "test_baseline": {
-    "default_dev_extra": "551 passed + 7 skipped",
-    "with_scale_and_gql_extras": "558 passed (with RECKORA_TEST_REDIS_URL set)",
-    "mypy_source_files": 34
+    "default_dev_extra": "579 passed + 7 skipped",
+    "with_scale_and_gql_extras": "586 passed (with RECKORA_TEST_REDIS_URL set)",
+    "mypy_source_files": 35
   },
   "phases": {
     "9a": {"status": "shipped", "feat": "b911a72", "docs": "7e8073e", "tests_added": 41},
@@ -185,15 +186,14 @@ Expected: 3 check_runs (`backend`, `frontend`, `e2e (Playwright)`), all `status=
     "9c": {"status": "shipped", "feat": "ecbebef", "docs": "085fb95", "tests_added": 18},
     "9d": {"status": "shipped", "feat": "18903bc", "docs": "d05fb62", "tests_added": 26},
     "9e": {"status": "shipped", "feat": "ac9bbdf", "docs": "47e1a23", "tests_added": 24},
-    "9f": {"status": "shipped", "feat": "7dd7bfd", "docs": null, "tests_added": 17},
-    "9g": {"status": "pending", "feat": null, "docs": null, "tests_added": null},
+    "9f": {"status": "shipped", "feat": "7dd7bfd", "docs": "736792b", "tests_added": 17},
+    "9g": {"status": "shipped", "feat": "2d5f4ad", "docs": null, "tests_added": 28},
     "9h": {"status": "pending", "feat": null, "docs": null, "tests_added": null}
   },
   "active_batch": {
-    "phase": "9g",
-    "blocking": true,
-    "blocking_reason": "User requested pause after 9f full ship; awaiting explicit signal before starting 9g",
-    "next_action": "Wait for user signal, then implement Phase 9g proxy reputation warm-up + weighted selection — see §4 for file-touch map"
+    "phase": "9h",
+    "blocking": false,
+    "next_action": "Implement Phase 9h HF Space keep-warm cron — see §4 for file-touch map"
   },
   "deploy_strategy": {
     "decision_date": "2026-05-07",
@@ -357,4 +357,4 @@ Whenever quota drops below 15%, **immediately**:
 
 ---
 
-*Last updated: 2026-05-07 — Phase 9c shipped, 9d–9h pending, deploy strategy locked-in.*
+*Last updated: 2026-05-07 — Phase 9g shipped, 9h pending, deploy strategy locked-in.*
