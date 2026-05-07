@@ -642,6 +642,22 @@ def _confidence(site: Site, status: Status, http_status: int | None, signals: li
             base = min(100, base + 4)
         elif site.alexa_rank <= 10_000:
             base = min(100, base + 2)
+    # Phase 10b: tentative-site confidence cap. Sites flagged
+    # ``tentative=True`` were originally trimmed by the build-time
+    # quality gate because they returned ambiguous 200s on any path —
+    # we ship them so an operator can opt-in for max-recall scans, but
+    # we cap their CLAIMED rule-based confidence at
+    # ``max_tentative_confidence`` (default 70) so the Phase 5h
+    # precision floor still demotes them to UNKNOWN unless ML +
+    # verify both vouch strongly. The cap only applies to CLAIMED
+    # rows: a tentative-site FREE/UNKNOWN/BLOCKED stays as-is because
+    # it carries no false-claim risk. The cap is a *ceiling*, not a
+    # floor — a tentative site that legitimately scores below the cap
+    # is left untouched.
+    if site.tentative and status == Status.CLAIMED:
+        cap = _admin_int("max_tentative_confidence")
+        if 0 <= cap < base:
+            base = cap
     return base
 
 

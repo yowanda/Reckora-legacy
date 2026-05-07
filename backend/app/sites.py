@@ -84,6 +84,19 @@ class Site:
     # != ``url``, Layer E probes the display URL independently after the
     # main liveness check passes on the probe URL.
     url_probe: str | None = None
+    # Phase 10b: catalog parity. ``tentative=True`` marks a site that
+    # was *previously trimmed* by the precision quality gate in
+    # ``scripts/build_sites.py`` because it returned ambiguous 200s on
+    # any path or required login to classify. We now ship the entry but
+    # gate it behind the ``enable_tentative_sites`` admin knob (default
+    # off), so the runtime catalog still reflects the trimmed precision
+    # default while letting an operator opt-in for max-recall scans
+    # via a tag filter or knob flip. The companion
+    # ``tentative_reason`` field records *why* the gate trimmed the
+    # site (e.g. ``returns_200_on_any_path``) so the SPA can render an
+    # informative tooltip in the tentative-tag picker.
+    tentative: bool = False
+    tentative_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,13 +114,34 @@ class SiteCatalog:
         tags: Iterable[str] | None = None,
         limit: int | None = None,
         identity_type: IdentityType = DEFAULT_IDENTITY_TYPE,
+        *,
+        include_tentative: bool | None = None,
     ) -> list[Site]:
+        """Return the probe-eligible subset of the catalog.
+
+        Phase 10b: when ``include_tentative`` is ``None`` (the default),
+        the runtime reads the ``enable_tentative_sites`` admin knob —
+        ``0`` skips every site flagged ``tentative=True`` so the
+        pre-Phase-10b probe set is preserved byte-for-byte. Pass
+        ``include_tentative=True`` (or ``False``) to opt out of the
+        knob and force the projection — used by tests and the catalog
+        admin endpoint that wants to surface every site regardless of
+        runtime gating. The user-supplied ``tags`` filter still wins
+        when it explicitly asks for ``"tentative"`` — operators who
+        type-in the tag are signalling intent.
+        """
         wanted = {t.lower() for t in tags or ()}
+        if include_tentative is None:
+            from . import admin_settings as _admin_settings_mod
+
+            include_tentative = bool(_admin_settings_mod.effective_int("enable_tentative_sites"))
         out: list[Site] = []
         for s in self.sites:
             if s.disabled:
                 continue
             if identity_type not in s.identity_types:
+                continue
+            if s.tentative and not include_tentative and "tentative" not in wanted:
                 continue
             if wanted and not ({t.lower() for t in s.tags} & wanted):
                 continue
@@ -166,6 +200,20 @@ def _coerce_site(name: str, raw: dict, *, source: str = "base") -> Site | None:
         # already carry an ``identityTypes`` field — admin patches win.
         identity_types = KNOWN_IDENTITY_OVERRIDES.get(name, (DEFAULT_IDENTITY_TYPE,))
 
+    # Phase 10b: tentative-sites parity. Sites flagged ``tentative`` in
+    # ``sites.json`` carry a ``tentative_reason`` describing why the
+    # build-time quality gate originally trimmed them. We auto-add
+    # ``"tentative"`` to ``tags`` so existing tag filters (catalog
+    # views, the SPA picker, ``SiteCatalog.filtered``) can match it
+    # without a special case — but we *do not* mutate the persisted
+    # ``tags`` list in ``sites.json``; the projection is purely
+    # in-memory.
+    tentative = bool(raw.get("tentative"))
+    base_tags = tuple(raw.get("tags") or ())
+    if tentative and "tentative" not in base_tags:
+        all_tags = (*base_tags, "tentative")
+    else:
+        all_tags = base_tags
     return Site(
         name=name,
         url=url,
@@ -176,7 +224,7 @@ def _coerce_site(name: str, raw: dict, *, source: str = "base") -> Site | None:
         presense_strs=tuple(raw.get("presenseStrs") or ()),
         headers=headers,
         alexa_rank=raw.get("alexaRank"),
-        tags=tuple(raw.get("tags") or ()),
+        tags=all_tags,
         error_strs=error_strs,
         head_only=bool(raw.get("requestHeadOnly")),
         ignore_403=bool(raw.get("ignore403")),
@@ -186,6 +234,8 @@ def _coerce_site(name: str, raw: dict, *, source: str = "base") -> Site | None:
         source=source,  # type: ignore[arg-type]
         identity_types=identity_types,
         url_probe=raw.get("urlProbe"),
+        tentative=tentative,
+        tentative_reason=raw.get("tentativeReason") or None,
     )
 
 
@@ -225,6 +275,19 @@ def site_to_raw(site: Site) -> dict:
         raw["identityTypes"] = list(site.identity_types)
     if site.url_probe:
         raw["urlProbe"] = site.url_probe
+    # Phase 10b: persist the tentative flag + reason so admin overrides
+    # round-trip through the editor without losing precision-trim
+    # provenance. The auto-injected ``"tentative"`` tag is not
+    # serialised — ``_coerce_site`` re-derives it from ``tentative=True``
+    # on the next load so the in-memory projection stays canonical.
+    if site.tentative:
+        raw["tentative"] = True
+    if site.tentative_reason:
+        raw["tentativeReason"] = site.tentative_reason
+    if site.tentative and raw.get("tags"):
+        raw["tags"] = [t for t in raw["tags"] if t != "tentative"]
+        if not raw["tags"]:
+            del raw["tags"]
     return raw
 
 
