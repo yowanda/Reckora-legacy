@@ -11,11 +11,11 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 
 | Field | Value |
 | --- | --- |
-| Repo HEAD on main | `886d448` (Phase 7c — reverse-image lookup hook) → bumped on next push to Phase 7d |
-| HF Space HEAD | `784ac59` (mirrors main through Phase 5h-FE; Phase 6 / 7a / 7b / 7c / 7d not yet redeployed) |
-| Active batch | _none — Phase 7 closed; next batch TBD_ |
-| Last batch shipped | Phase 7d — ML reranker retrain pipeline + drift detector (`app/ml_drift.py` Kolmogorov-Smirnov + `app/ml_retrain.py` sync trainer + `/api/admin/ml/{status,retrain}` + AdminPanel `MlTab` + 31 new tests + Playwright e2e) |
-| Last update | 2026-05-07 (Phase 7d — ML reranker retrain pipeline) |
+| Repo HEAD on main | `945c6bc` (Phase 7d — ML reranker retrain pipeline + drift detector) |
+| HF Space HEAD | `0551938` (mirrors main `945c6bc` — Phase 6 + Phase 7 catch-up deployed 2026-05-07; health 200, sites 2506, all Phase 6/7 endpoints `/api/enrich/email` / `/api/reverse-image` / `/api/admin/ml/status` / `/api/admin/ml/retrain` / `/api/search/permute` respond 401 not 404, confirming new code is live) |
+| Active batch | _none — Phase 7 closed and HF mirror caught up; next batch TBD (Phase 8a Celery+Redis is the planned default)_ |
+| Last batch shipped | Phase 7-deploy — HF Space mirror sync (Phase 6 + Phase 7 catch-up: 8 commits `8faf4c8`→`945c6bc` rsync-mirrored to HF Space `784ac59`→`0551938`; Docker rebuild green; health 200 / sites 2506; every new Phase 6+7 endpoint reachable behind auth gate) |
+| Last update | 2026-05-07 (Phase 7-deploy — HF mirror sync) |
 | Test baseline | backend pytest **356 / 356** · mypy 23 src files · ruff clean · frontend lint+build green · e2e **8 / 8** |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
@@ -65,6 +65,7 @@ once `command git push origin main` returns and CI is green.
 - [x] **7b** — WHOIS / HIBP-style breach enrichment for `identity_type=email` (`app/enrichment.py` runs RDAP + HIBP lookups in parallel; admin knobs `enable_email_enrichment` + `enrichment_rate_per_min`; HIBP key in env-only `enrichment_hibp_api_key`; SPA mounts `EmailEnrichmentPanel` after every list-mode email scan; 33 new tests covering parsers, rate limiter, mocked HTTP fetchers, endpoint auth/gating/rate-limit, and a Playwright e2e)
 - [x] **7c** — reverse-image lookup hook (Yandex / Google Lens / TinEye) (`app/reverseimage.py` builds public reverse-search landing-page URLs; admin knob `enable_reverse_image` + 3 template settings; SPA `ReverseImageChips` renders a chip row under any CLAIMED hit whose extractor pass produced an `avatar_url`; no API key, no upstream HTTP call from the backend; 21 new tests + a Playwright e2e)
 - [x] **7d** — ML reranker retrain pipeline + drift detector (`app/ml_drift.py` pure-Python two-sample Kolmogorov-Smirnov + `FeatureSummary`/`FeatureDrift`/`DriftReport` dataclasses; `app/ml_retrain.py` synchronous trainer that subprocess-runs `scripts/train_ml.py`, persists `RetrainStatus` to `app/ml/retrain_status.json` so it survives worker restarts; admin knobs `ml_drift_ks_threshold_pct` + `ml_drift_window_size`; ML scoring fan-outs into a bounded ring buffer used as the drift "current" sample; new admin endpoints `GET /api/admin/ml/status` + `POST /api/admin/ml/retrain`; SPA AdminPanel grows an `ML` tab with model age, last-retrain row, "Retrain now" button, drift summary chip and per-feature KS table; 31 new backend tests + a Playwright e2e)
+- [x] **7-deploy** — HF Space mirror sync to catch up with main (8 commits `8faf4c8`→`945c6bc` rsync-mirrored to HF Space `784ac59`→`0551938`; Docker rebuild green; `GET /api/health` 200 with sites=2506; every Phase 6+7 endpoint verified reachable behind auth gate: `POST /api/enrich/email`, `POST /api/reverse-image`, `GET /api/admin/ml/status`, `POST /api/admin/ml/retrain`, `POST /api/search/permute`, `GET /api/permute/strategies` — all return 401 "login required" not 404/405, confirming new code is live; click-test deferred to operator with admin creds)
 
 ### Phase 8 — scale & infra  *(planned)*
 
