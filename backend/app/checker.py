@@ -1101,13 +1101,13 @@ async def stream_checks(
     if owned_client:
         # http2=True saves ~1 RTT per host on warm pools; many CMS-hosted
         # sites support it. The h2 pkg is pulled in via httpx[http2].
-        client = httpx.AsyncClient(
-            timeout=settings.request_timeout,
-            http2=True,
-            limits=httpx.Limits(
-                max_connections=settings.total_concurrency,
-                max_keepalive_connections=settings.total_concurrency,
-            ),
+        # Phase 8b: routes through the proxy rotator + per-host bucket
+        # when their knobs are on; falls back to direct egress
+        # otherwise, so the no-feature-flag default is unchanged.
+        from . import transport as transport_mod
+
+        client = transport_mod.build_async_client(
+            follow_redirects=False,
         )
     assert client is not None
 

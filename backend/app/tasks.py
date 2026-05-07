@@ -24,8 +24,6 @@ import threading
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
-import httpx
-
 from .config import settings
 
 T = TypeVar("T")
@@ -137,14 +135,13 @@ def _run_check_site(
         ).to_dict()
 
     async def _run() -> CheckResult:
-        async with httpx.AsyncClient(
-            timeout=settings.request_timeout,
-            http2=True,
-            limits=httpx.Limits(
-                max_connections=settings.per_host_concurrency,
-                max_keepalive_connections=settings.per_host_concurrency,
-            ),
-            follow_redirects=True,
+        # Phase 8b: every Celery worker also goes through the
+        # rotator + per-host token bucket so a fan-out of 50 workers
+        # doesn't pound a single host without coordination.
+        from . import transport as transport_mod
+
+        async with transport_mod.build_async_client(
+            max_connections=settings.per_host_concurrency,
         ) as client:
             try:
                 return await check_site(

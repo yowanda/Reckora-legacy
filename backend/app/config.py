@@ -249,5 +249,43 @@ class Settings(BaseSettings):
     # check latency is in the 200-2000 ms range.
     celery_poll_interval: float = 0.025
 
+    # Phase 8b: rate-limit-aware proxy rotator.
+    #
+    # Two independent capabilities, both opt-in via admin knobs:
+    #
+    #  1. Multi-proxy egress pool (`enable_proxy_rotator=1`). When on,
+    #     every outbound request through `_new_async_client` is routed
+    #     via one of the URLs in `proxy_pool_urls` (comma-separated env
+    #     `RECKORA_PROXY_POOL_URLS`). Selection is round-robin with a
+    #     short health cooldown after a transport error so a flaky
+    #     proxy doesn't keep getting picked. The pool **supersedes**
+    #     the Phase 5e single `proxy_url` while it's enabled, so
+    #     operators with one proxy can continue to use 5e's gate; only
+    #     flip 8b on when there is more than one egress IP.
+    #
+    #  2. Per-host token-bucket rate limit (`enable_host_rate_limit=1`).
+    #     When on, each request waits for a token from the host's
+    #     bucket before dispatch. `host_rate_per_min` is the steady-
+    #     state refill rate; the bucket's capacity matches it so a
+    #     1-minute idle period absorbs a 60-request burst on a 60/min
+    #     bucket. Limits are per-host (request URL host, lowercased),
+    #     so Reddit's bucket is independent from Twitter's.
+    #
+    # Defaults are 0 / 0 — HF Space's single-container deployment is
+    # untouched until an operator turns either knob on.
+    proxy_pool_urls: str = ""
+    enable_proxy_rotator: int = 0
+    enable_host_rate_limit: int = 0
+    # 1-600 requests / minute / host. 60 (== 1 rps / host) is a safe
+    # default that keeps the largest sites well below their public
+    # documented limits while still letting a 2,506-site scan finish
+    # in a reasonable time on a fan-out of ~50 concurrent workers.
+    host_rate_per_min: int = 60
+    # 1-600 seconds. After a transport error against a proxy URL the
+    # pool will skip that URL for this many seconds before reusing it.
+    # 60s matches the default per-host bucket window so a tripped
+    # proxy gets one full bucket cycle to recover.
+    proxy_health_cooldown_sec: int = 60
+
 
 settings = Settings()

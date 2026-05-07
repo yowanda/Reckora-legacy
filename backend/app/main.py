@@ -27,6 +27,7 @@ from . import history as history_mod
 from . import permutations as permutations_mod
 from . import proxy as proxy_mod
 from . import site_overrides as overrides_mod
+from . import transport as transport_mod
 from .auth import (
     SESSION_COOKIE,
     SESSION_TTL_SECONDS,
@@ -361,6 +362,9 @@ async def admin_patch_member(
 
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
+    from . import host_rate_limit as host_rate_limit_mod
+    from . import proxy_pool as proxy_pool_mod
+
     return {
         "status": "ok",
         "version": __version__,
@@ -368,6 +372,12 @@ async def health() -> dict[str, Any]:
         # Phase 5e: surface proxy state without leaking the URL itself
         # so an external uptime probe can flag a dropped Tor circuit.
         "proxy": proxy_mod.status(),
+        # Phase 8b: descriptors for the multi-proxy pool + per-host
+        # token bucket. Pool members are reported by scheme only — the
+        # full URL stays env-only so a leaked health probe never
+        # exposes proxy credentials.
+        "proxy_pool": proxy_pool_mod.status(),
+        "host_rate_limit": host_rate_limit_mod.status(),
     }
 
 
@@ -398,19 +408,14 @@ def _sse_event(event: str, payload: dict[str, Any]) -> bytes:
 def _new_async_client() -> httpx.AsyncClient:
     """Build the shared httpx client used by all three search streams.
 
-    Centralised so the proxy gate (Phase 5e) is uniformly applied; the
-    extra arg is harmless when the proxy is off (``None``).
+    Goes through :func:`app.transport.build_async_client` so both the
+    Phase 5e single-proxy gate *and* the Phase 8b rate-limit-aware
+    multi-proxy rotator are uniformly applied. The transport
+    transparently falls back to direct egress when neither feature is
+    on, so behaviour for the HF Space single-container deployment is
+    unchanged.
     """
-    return httpx.AsyncClient(
-        timeout=settings.request_timeout,
-        http2=True,
-        limits=httpx.Limits(
-            max_connections=settings.total_concurrency,
-            max_keepalive_connections=settings.total_concurrency,
-        ),
-        follow_redirects=True,
-        proxy=proxy_mod.proxy_url_or_none(),
-    )
+    return transport_mod.build_async_client()
 
 
 async def _search_stream(

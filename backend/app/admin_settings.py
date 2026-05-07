@@ -274,6 +274,65 @@ KNOBS: tuple[KnobSpec, ...] = (
             "catalog without leaking memory."
         ),
     ),
+    KnobSpec(
+        key="enable_proxy_rotator",
+        settings_attr="enable_proxy_rotator",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 8b: when 1, every outbound request is routed "
+            "via one of the URLs in ``RECKORA_PROXY_POOL_URLS`` "
+            "(comma-separated env). Round-robin selection with a "
+            "per-URL health cooldown skips any proxy that has "
+            "recently raised a transport error. When 0, the pool "
+            "is dormant and the runtime falls back to the Phase 5e "
+            "single-proxy gate (``proxy_enabled``). Setting this "
+            "to 1 with no pool URLs configured is a no-op."
+        ),
+    ),
+    KnobSpec(
+        key="enable_host_rate_limit",
+        settings_attr="enable_host_rate_limit",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 8b: when 1, every outbound request waits for a "
+            "token from a per-host bucket before dispatch. The "
+            "bucket refill rate comes from "
+            "``host_rate_per_min``. Use this to keep large scans "
+            "below per-host public rate limits even on a single "
+            "egress IP."
+        ),
+    ),
+    KnobSpec(
+        key="host_rate_per_min",
+        settings_attr="host_rate_per_min",
+        minimum=1,
+        maximum=600,
+        description=(
+            "Phase 8b: steady-state requests / minute / host the "
+            "outbound token bucket grants when "
+            "``enable_host_rate_limit`` is 1. The bucket capacity "
+            "matches this value so a 1-minute idle period absorbs "
+            "the equivalent burst. 60 (== 1 rps / host) is a safe "
+            "default below the documented limits of all the major "
+            "platforms in the catalog."
+        ),
+    ),
+    KnobSpec(
+        key="proxy_health_cooldown_sec",
+        settings_attr="proxy_health_cooldown_sec",
+        minimum=1,
+        maximum=600,
+        description=(
+            "Phase 8b: how long (seconds) the proxy rotator skips "
+            "a URL after a transport error against it. The pool "
+            "is fail-open — when every URL is in cooldown it "
+            "returns ``None`` and the request goes direct, since "
+            "refusing every request is worse than briefly leaking "
+            "the API process's IP."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}
