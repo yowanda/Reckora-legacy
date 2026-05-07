@@ -301,5 +301,32 @@ class Settings(BaseSettings):
     # PATCH /api/admin/settings without redeploying.
     enable_graphql_gateway: int = 0
 
+    # Phase 8d: public share links + edge cache for shared scans.
+    #
+    # When ``enable_share_links`` is 1 a scan owner can mint a
+    # URL-safe random token via ``POST /api/history/{scan_id}/share``
+    # and the public endpoint ``GET /share/{token}`` returns the scan
+    # summary + results without authentication. ``Cache-Control``
+    # uses ``s-maxage`` so a CDN edge keeps the response in front of
+    # the backend for ``share_link_cache_max_age_sec`` seconds.
+    enable_share_links: int = 0
+    # 0 = links never expire until explicitly revoked. Anything > 0
+    # is treated as the default TTL applied when the owner doesn't
+    # specify ``ttl_sec`` on the mint request; the owner is also
+    # capped at this value when the knob is non-zero so a misbehaving
+    # SPA can't lock a publicly shared scan in for longer than admin
+    # policy allows.
+    share_link_default_ttl_sec: int = 0
+    # 1-86400 seconds. Edge ``s-maxage``. 60s is short enough that a
+    # revoke propagates within a minute on Cloudflare-class CDNs but
+    # long enough to absorb a viral scan landing on Reddit /
+    # HackerNews. Operators who don't care about revoke latency can
+    # bump this to e.g. 3600 to maximise edge-hit rate.
+    share_link_cache_max_age_sec: int = 60
+    # Per-scan cap so a single scan doesn't accumulate dozens of live
+    # tokens in the database. Tightened by raising this knob; new
+    # mint attempts past the cap return 409.
+    share_link_max_per_scan: int = 5
+
 
 settings = Settings()

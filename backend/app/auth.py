@@ -166,6 +166,23 @@ def init_db() -> None:
                 updated_by  TEXT NOT NULL,
                 updated_at  INTEGER NOT NULL
             );
+
+            -- Phase 8d: public share links for individual scans.
+            -- ``token`` is a URL-safe random string; ``expires_at=0``
+            -- means the link never expires until explicitly revoked.
+            -- ``scan_id`` references ``scans.id`` but is NOT a strict FK
+            -- (SQLite doesn't enforce FKs by default in our pragma set);
+            -- we soft-clean dangling rows when the parent scan is
+            -- deleted via ``DELETE /api/history/{scan_id}``.
+            CREATE TABLE IF NOT EXISTS share_links (
+                token       TEXT PRIMARY KEY,
+                scan_id     INTEGER NOT NULL,
+                member      TEXT NOT NULL COLLATE NOCASE,
+                created_at  INTEGER NOT NULL,
+                expires_at  INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_share_links_scan_member
+                ON share_links(scan_id, member);
             """
         )
         # Phase 5c: migrate ``scans`` if its CHECK constraint pre-dates the

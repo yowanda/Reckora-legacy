@@ -416,6 +416,15 @@ async def health() -> dict[str, Any]:
         }
     except ImportError:
         payload["graphql"] = {"available": False, "installed": False}
+    # Phase 8d: surface share-link state so a dashboard can detect
+    # whether public shares are currently mintable, plus the
+    # configured edge-cache window. The cache window is intentionally
+    # public — it leaks no secrets and lets a CDN debugger confirm
+    # the response will indeed be cached for the expected duration.
+    payload["share_links"] = {
+        "enabled": admin_settings_mod.effective_int("enable_share_links") == 1,
+        "cache_max_age_sec": admin_settings_mod.effective_int("share_link_cache_max_age_sec"),
+    }
     return payload
 
 
@@ -1461,7 +1470,197 @@ async def history_delete(
         raise HTTPException(404, "scan history disabled")
     if not history_mod.delete_scan(scan_id, member.username):
         raise HTTPException(404, "scan not found")
+    # Phase 8d: cascade-revoke any outstanding public share links so
+    # ``GET /share/{token}`` returns 404 immediately and a stale CDN
+    # entry naturally expires within the cache window.
+    from . import share_links as share_links_mod
+
+    share_links_mod.revoke_all_for_scan(scan_id=scan_id)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Phase 8d: public share links + edge-cacheable read endpoint.
+# ---------------------------------------------------------------------------
+
+
+class ShareLinkMintRequest(BaseModel):
+    ttl_sec: int | None = Field(default=None, ge=0, le=31_536_000)
+
+
+def _share_links_enabled() -> None:
+    if admin_settings_mod.effective_int("enable_share_links") != 1:
+        raise HTTPException(503, "share links disabled")
+
+
+@app.post("/api/history/{scan_id}/share", status_code=201)
+async def share_link_create(
+    scan_id: int,
+    body: ShareLinkMintRequest,
+    member: Member = Depends(current_member),
+) -> dict[str, Any]:
+    """Mint a public share link for one of the caller's scans.
+
+    Owner is verified by attempting to read the scan with the
+    member's username; a 404 here doubles as a privacy guard for
+    other members' scan ids.
+    """
+    _share_links_enabled()
+    if not settings.enable_scan_history:
+        raise HTTPException(404, "scan history disabled")
+    if history_mod.get_scan(scan_id, member.username) is None:
+        raise HTTPException(404, "scan not found")
+
+    from . import share_links as share_links_mod
+
+    default_ttl = admin_settings_mod.effective_int("share_link_default_ttl_sec")
+    requested_ttl = body.ttl_sec if body.ttl_sec is not None else default_ttl
+    if default_ttl > 0:
+        # Admin-set ceiling wins over the owner's request.
+        ttl_sec = min(requested_ttl, default_ttl) if requested_ttl > 0 else default_ttl
+    else:
+        ttl_sec = max(0, requested_ttl)
+
+    cap = admin_settings_mod.effective_int("share_link_max_per_scan")
+    link = share_links_mod.mint(
+        scan_id=scan_id,
+        member=member.username,
+        ttl_sec=ttl_sec,
+        max_per_scan=cap,
+    )
+    if link is None:
+        raise HTTPException(
+            409,
+            f"share link limit reached for this scan (max {cap}); "
+            "revoke an existing one to free a slot",
+        )
+    return {"share": link.to_dict()}
+
+
+@app.get("/api/history/{scan_id}/shares")
+async def share_link_list(
+    scan_id: int,
+    member: Member = Depends(current_member),
+) -> dict[str, Any]:
+    """List active share links for a scan owned by the caller."""
+    _share_links_enabled()
+    if not settings.enable_scan_history:
+        raise HTTPException(404, "scan history disabled")
+    if history_mod.get_scan(scan_id, member.username) is None:
+        raise HTTPException(404, "scan not found")
+    from . import share_links as share_links_mod
+
+    rows = share_links_mod.list_for_scan(scan_id=scan_id, member=member.username)
+    return {"shares": [r.to_dict() for r in rows]}
+
+
+@app.delete("/api/history/{scan_id}/share/{token}")
+async def share_link_revoke(
+    scan_id: int,
+    token: str,
+    member: Member = Depends(current_member),
+) -> dict[str, Any]:
+    """Revoke a single share link. ``scan_id`` is in the path purely
+    for client-side ergonomics — the database revoke uses
+    ``token + member`` so cross-scan tokens with the same prefix are
+    unaffected."""
+    _share_links_enabled()
+    if not settings.enable_scan_history:
+        raise HTTPException(404, "scan history disabled")
+    from . import share_links as share_links_mod
+
+    if not share_links_mod.revoke(token=token, member=member.username):
+        raise HTTPException(404, "share link not found")
+    return {"ok": True, "scan_id": scan_id}
+
+
+@app.get("/share/{token}")
+async def share_link_public(
+    request: Request,
+    token: str,
+) -> Response:
+    """Anonymous CDN-friendly read endpoint for shared scans.
+
+    No auth, no cookies, no member identity in the response. The
+    payload is the same shape as ``GET /api/history/{scan_id}`` but
+    sealed at mint time — re-running the parent scan does NOT
+    invalidate the link unless the owner explicitly revokes and
+    re-mints.
+
+    Cache headers:
+
+    * ``Cache-Control: public, s-maxage=<knob>,
+      stale-while-revalidate=<knob/2>`` — CDN edges keep the
+      response for ``share_link_cache_max_age_sec`` and revalidate in
+      the background up to half that long after expiry.
+    * ``ETag: "<sha256(token|finished_at)[:16]>"`` — when the client
+      sends ``If-None-Match`` we return 304.
+    * ``Vary: accept-encoding`` so the same edge entry serves both
+      ``gzip`` and ``br`` clients without colliding.
+    """
+    if admin_settings_mod.effective_int("enable_share_links") != 1:
+        return ORJSONResponse(
+            status_code=503,
+            content={"detail": "share links disabled"},
+        )
+    from . import share_links as share_links_mod
+
+    # Best-effort GC on the read path so an expired token request
+    # also drops the row. The query is indexed and bounded by
+    # ``share_link_max_per_scan x scan_count`` so it's cheap.
+    share_links_mod.purge_expired()
+    link = share_links_mod.lookup(token)
+    if link is None:
+        return ORJSONResponse(
+            status_code=404,
+            content={"detail": "share link not found or expired"},
+        )
+    if not settings.enable_scan_history:
+        return ORJSONResponse(
+            status_code=404,
+            content={"detail": "scan history disabled"},
+        )
+    out = history_mod.get_scan(link.scan_id, link.member)
+    if out is None:
+        return ORJSONResponse(
+            status_code=404,
+            content={"detail": "underlying scan no longer available"},
+        )
+    summary, results = out
+    etag = share_links_mod.etag_for(link, summary.finished_at)
+    if request.headers.get("if-none-match") == etag:
+        max_age = admin_settings_mod.effective_int("share_link_cache_max_age_sec")
+        return Response(
+            status_code=304,
+            headers={
+                "etag": etag,
+                "cache-control": (
+                    f"public, s-maxage={max_age}, stale-while-revalidate={max_age // 2}"
+                ),
+                "vary": "accept-encoding",
+            },
+        )
+    max_age = admin_settings_mod.effective_int("share_link_cache_max_age_sec")
+    payload: dict[str, Any] = {
+        "share": {
+            "token": link.token,
+            "created_at": link.created_at,
+            "expires_at": link.expires_at,
+        },
+        "scan": summary.to_dict(),
+        "results": results,
+    }
+    return ORJSONResponse(
+        content=payload,
+        headers={
+            "etag": etag,
+            "cache-control": (f"public, s-maxage={max_age}, stale-while-revalidate={max_age // 2}"),
+            "vary": "accept-encoding",
+            # Guidance for browsers (NOT the CDN): treat this as a
+            # short-lived asset; reload-from-server is fine.
+            "x-content-type-options": "nosniff",
+        },
+    )
 
 
 @app.get("/api/history/diff/{from_id}/{to_id}")

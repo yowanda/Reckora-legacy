@@ -349,6 +349,59 @@ KNOBS: tuple[KnobSpec, ...] = (
             "token used by REST."
         ),
     ),
+    KnobSpec(
+        key="enable_share_links",
+        settings_attr="enable_share_links",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 8d: when 1, scan owners can mint anonymous public "
+            "share links via ``POST /api/history/{id}/share`` and "
+            "the unauthenticated ``GET /share/{token}`` returns the "
+            "scan summary + results with CDN-friendly cache headers. "
+            "When 0, both endpoints return 503 so a deployment that "
+            "hasn't reviewed the privacy implications doesn't "
+            "accidentally expose member-scoped scan data."
+        ),
+    ),
+    KnobSpec(
+        key="share_link_default_ttl_sec",
+        settings_attr="share_link_default_ttl_sec",
+        minimum=0,
+        maximum=31_536_000,  # 1 year cap
+        description=(
+            "Phase 8d: default TTL applied to a share link when the "
+            "owner doesn't pass ``ttl_sec`` on the mint request. "
+            "0 = never expire until explicitly revoked. Anything > "
+            "0 also caps the owner-specified TTL so admin policy "
+            "wins over a misbehaving SPA."
+        ),
+    ),
+    KnobSpec(
+        key="share_link_cache_max_age_sec",
+        settings_attr="share_link_cache_max_age_sec",
+        minimum=1,
+        maximum=86_400,
+        description=(
+            "Phase 8d: edge ``s-maxage`` (seconds) on the public "
+            "``/share/{token}`` response. 60s lets a revoke "
+            "propagate within a minute on Cloudflare-class CDNs but "
+            "still soaks up viral traffic. Bump higher to maximise "
+            "edge-hit rate when revoke latency is acceptable."
+        ),
+    ),
+    KnobSpec(
+        key="share_link_max_per_scan",
+        settings_attr="share_link_max_per_scan",
+        minimum=1,
+        maximum=50,
+        description=(
+            "Phase 8d: maximum number of active (non-expired) share "
+            "links per scan. Mint requests past the cap return 409 "
+            "so a scan can't accumulate dozens of dangling tokens; "
+            "owners can revoke an existing one to free a slot."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}
