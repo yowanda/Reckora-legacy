@@ -1,0 +1,100 @@
+name: catalog-regen
+
+# Phase 9e — quarterly catalog auto-refresh from upstream maigret.
+#
+# Cron schedule: 05:00 UTC on the first day of every quarter
+# (Jan / Apr / Jul / Oct). The job downloads the latest tagged
+# ``soxoj/maigret`` snapshot, regenerates the bundled
+# ``backend/app/data/sites.json`` via ``scripts/build_sites.py``,
+# diffs the result against ``main`` HEAD via
+# ``backend/scripts/refresh_catalog.py``, and opens a PR titled
+# ``chore(catalog): quarterly refresh from soxoj/maigret <tag>``
+# with the markdown diff inlined.
+#
+# When no PRs are needed (zero deltas), the job exits 0 silently.
+#
+# A ``workflow_dispatch`` trigger is also wired so a maintainer can
+# fire an ad-hoc refresh from the GitHub UI without waiting for the
+# next quarter boundary.
+
+on:
+  schedule:
+    # 05:00 UTC on the first day of every 3rd month — Jan 1, Apr 1,
+    # Jul 1, Oct 1. ``*/3`` matches months 1, 4, 7, 10 because cron
+    # always anchors on the smallest valid value (1) for that field.
+    - cron: "0 5 1 */3 *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Reckora
+        uses: actions/checkout@v4
+
+      - name: Resolve latest soxoj/maigret tag
+        id: maigret_tag
+        run: |
+          set -eu
+          TAG=$(curl -sSf -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/soxoj/maigret/releases/latest" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved upstream tag: ${TAG}"
+
+      - name: Download upstream maigret data.json
+        run: |
+          set -eu
+          mkdir -p /tmp/maigret-refresh
+          curl -sSfL \
+            "https://raw.githubusercontent.com/soxoj/maigret/${{ steps.maigret_tag.outputs.tag }}/maigret/resources/data.json" \
+            -o /tmp/maigret-refresh/data.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Regenerate candidate sites.json
+        run: |
+          set -eu
+          mkdir -p /tmp/maigret-refresh docs
+          python3 backend/scripts/build_sites.py \
+            /tmp/maigret-refresh/data.json \
+            /tmp/maigret-refresh/sites.upstream.json
+          python3 -m backend.scripts.refresh_catalog \
+            --upstream-data /tmp/maigret-refresh/sites.upstream.json \
+            --current backend/app/data/sites.json \
+            --candidate /tmp/maigret-refresh/sites.candidate.json \
+            --report /tmp/maigret-refresh/report.md \
+            --upstream-tag "${{ steps.maigret_tag.outputs.tag }}"
+
+      - name: Open quarterly catalog refresh PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_TAG: ${{ steps.maigret_tag.outputs.tag }}
+        run: |
+          set -eu
+          # Compare candidate to current; bail out if byte-equivalent.
+          if cmp -s /tmp/maigret-refresh/sites.candidate.json backend/app/data/sites.json; then
+            echo "No catalog deltas — exiting cleanly."
+            exit 0
+          fi
+          BRANCH="chore/catalog-refresh-${UPSTREAM_TAG}"
+          git config user.name "reckora-catalog-bot"
+          git config user.email "catalog-bot@users.noreply.github.com"
+          git checkout -b "${BRANCH}"
+          cp /tmp/maigret-refresh/sites.candidate.json backend/app/data/sites.json
+          cp /tmp/maigret-refresh/report.md "docs/catalog-refresh-${UPSTREAM_TAG}.md"
+          git add backend/app/data/sites.json "docs/catalog-refresh-${UPSTREAM_TAG}.md"
+          git commit -m "chore(catalog): quarterly refresh from soxoj/maigret ${UPSTREAM_TAG}"
+          git push origin "${BRANCH}"
+          gh pr create \
+            --base main \
+            --head "${BRANCH}" \
+            --title "chore(catalog): quarterly refresh from soxoj/maigret ${UPSTREAM_TAG}" \
+            --body-file /tmp/maigret-refresh/report.md
