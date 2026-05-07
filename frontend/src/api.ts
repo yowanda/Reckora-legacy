@@ -11,6 +11,7 @@ import type {
   GraphExtracted,
   GraphPhashEdge,
   IdentityType,
+  InitialPdfReady,
   Member,
   ProxyStatus,
   PublicSettingsResponse,
@@ -129,6 +130,10 @@ export interface SearchEvents {
   onResult?: (r: CheckResult) => void
   onDone?: (info: { results: number; cached?: boolean }) => void
   onError?: (err: string) => void
+  // Phase 10a: synthetic SSE event the backend emits the first time a
+  // primary CLAIMED hit clears the configured floor. Optional —
+  // callers that don't care about the preliminary PDF can ignore it.
+  onInitialPdfReady?: (e: InitialPdfReady) => void
   signal?: AbortSignal
 }
 
@@ -372,6 +377,9 @@ function handleSseChunk(chunk: string, events: SearchEvents | GraphSearchEvents)
       e.onDone?.(
         data as { results: number; cached?: boolean; edges?: number; secondary_count?: number },
       )
+      break
+    case 'initial_pdf_ready':
+      e.onInitialPdfReady?.(data as InitialPdfReady)
       break
     case 'error':
       e.onError?.(String((data as { detail?: string }).detail ?? data))
