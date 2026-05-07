@@ -604,7 +604,12 @@ class GraphSearchRequest(SearchRequest):
     username ``identity_type`` values are rejected at the validator layer.
     """
 
-    depth: int = Field(default=1, ge=0, le=2)
+    # Phase 10d: depth field range bumped from 0-2 to 0-3. Operators
+    # who want depth>1 must *also* lift the ``graph_max_depth`` admin
+    # knob (default 1) — otherwise the runtime clamps the per-call
+    # ``req.depth`` down to the knob value, so existing deployments
+    # see no behaviour change unless they opt in.
+    depth: int = Field(default=1, ge=0, le=3)
     max_secondary: int | None = Field(default=None, ge=1, le=20)
 
     @model_validator(mode="after")
@@ -630,6 +635,18 @@ async def _graph_search_stream(
     effective_max_depth = knobs["graph_max_depth"]
     effective_max_secondary = knobs["graph_max_secondary"]
     effective_max_seed_hits = knobs["graph_max_seed_hits"]
+    # Phase 10d knobs — deep-recursion safety net. ``effective_map`` is
+    # guaranteed to return every registered knob, but we use ``.get``
+    # with the Settings default so unit tests that monkey-patch the
+    # admin map don't have to know about every new key.
+    secondary_conf_floor = knobs.get(
+        "graph_secondary_min_confidence",
+        settings.graph_secondary_min_confidence,
+    )
+    max_total_subscans = knobs.get(
+        "graph_max_total_subscans",
+        settings.graph_max_total_subscans,
+    )
 
     sites = catalog.filtered(tags=req.tags, limit=req.limit)
     yield _sse_event(
@@ -654,6 +671,11 @@ async def _graph_search_stream(
     primary_results: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     discovered: dict[str, str] = {}  # child_username -> source description
+    # Phase 10d: total sub-scan counter + capped counter. The capped
+    # counter is surfaced on the terminal ``done`` payload so the SPA
+    # can render a "+N candidates skipped (graph_subscan_cap)" badge.
+    subscan_count = 0
+    capped_subscans = 0
     tracker = initial_hit_mod.InitialHitTracker(
         context=initial_hit_mod.ScanContext(
             scan_token=initial_hit_mod.new_scan_token(),
@@ -667,7 +689,12 @@ async def _graph_search_stream(
 
     async with _new_async_client() as client:
         # ---- depth 0: primary scan ------------------------------------
-        seed_hits: list[tuple[str, dict[str, Any]]] = []  # (parent, payload)
+        # ``current_seeds`` accumulates the parents that are eligible
+        # to spawn the *next* generation. We re-use the same list
+        # across generations 1..effective_depth so the deep-recursion
+        # path is just a tight outer loop on top of the depth-1 logic
+        # that pre-dates Phase 10d.
+        current_seeds: list[tuple[str, dict[str, Any]]] = []
         async for result in stream_checks(sites, req.username, client=client):
             payload = result.to_dict()
             payload["parent_username"] = None
@@ -685,68 +712,132 @@ async def _graph_search_stream(
                 effective_depth >= 1
                 and result.status.value == "claimed"
                 and result.extracted
-                and len(seed_hits) < effective_max_seed_hits
+                and len(current_seeds) < effective_max_seed_hits
             ):
-                seed_hits.append((req.username, payload))
+                # Primary CLAIMED hits don't have to clear the
+                # ``graph_secondary_min_confidence`` floor — that gate
+                # only applies to spawning *deeper* generations. The
+                # primary already cleared the Phase 5h
+                # ``min_claimed_confidence`` floor by virtue of being
+                # CLAIMED at this point.
+                current_seeds.append((req.username, payload))
 
-        # ---- depth 1: extract + sub-scan ------------------------------
-        if effective_depth >= 1 and seed_hits:
+        # ---- depth 1..N: BFS over generations -------------------------
+        # Each iteration of the outer loop spawns one generation of
+        # sub-scans. We stop early when there are no eligible parents
+        # left (e.g. nothing extracted, or every child fell below the
+        # confidence floor).
+        if effective_depth >= 1 and current_seeds:
             from .extractor import find_secondary_usernames
 
-            sub_targets: list[tuple[str, str, dict[str, Any]]] = []
-            for parent_username, payload in seed_hits:
-                extracted = payload.get("extracted") or {}
-                yield _sse_event(
-                    "extracted",
-                    {
-                        "parent_username": parent_username,
-                        "site": payload["site"],
-                        "url": payload["url"],
-                        "fields": extracted,
-                    },
-                )
-                for child_username, evidence in find_secondary_usernames(
-                    extracted, parent_username
-                ):
-                    if child_username in discovered:
-                        continue
-                    if not is_valid_username(child_username):
-                        continue
-                    if len([t for t in sub_targets if t[0] == parent_username]) >= max_secondary:
-                        break
-                    discovered[child_username] = evidence
-                    edge = {
-                        "parent_username": parent_username,
-                        "child_username": child_username,
-                        "evidence": evidence,
-                        "source_site": payload["site"],
-                    }
-                    edges.append(edge)
-                    yield _sse_event("edge", edge)
-                    sub_targets.append((parent_username, child_username, payload))
+            for current_depth in range(1, effective_depth + 1):
+                if not current_seeds:
+                    break
+                # Children at the deepest layer never spawn another
+                # generation, so we skip the (expensive) extraction
+                # pass to keep payload size bounded — matches the
+                # pre-Phase-10d depth-1 behaviour exactly.
+                child_extract = current_depth < effective_depth
 
-            for parent_username, child_username, _payload in sub_targets:
-                yield _sse_event(
-                    "secondary_start",
-                    {
-                        "parent_username": parent_username,
-                        "child_username": child_username,
-                        "total": len(sites),
-                    },
-                )
-                # Sub-scans don't recurse further (depth-1 hard cap) and
-                # skip extraction to keep payload size bounded.
-                async for sub in stream_checks(
-                    sites,
-                    child_username,
-                    client=client,
-                    extract=False,
-                ):
-                    sub_payload = sub.to_dict()
-                    sub_payload["parent_username"] = child_username
-                    sub_payload["discovered_via"] = parent_username
-                    yield _sse_event("result", sub_payload)
-                    primary_results.append(sub_payload)
+                sub_targets: list[tuple[str, str, dict[str, Any]]] = []
+                for parent_username, parent_payload in current_seeds:
+                    extracted = parent_payload.get("extracted") or {}
+                    yield _sse_event(
+                        "extracted",
+                        {
+                            "parent_username": parent_username,
+                            "site": parent_payload["site"],
+                            "url": parent_payload["url"],
+                            "fields": extracted,
+                            "depth": current_depth,
+                        },
+                    )
+                    children_for_parent = 0
+                    for child_username, evidence in find_secondary_usernames(
+                        extracted, parent_username
+                    ):
+                        if child_username in discovered:
+                            continue
+                        if not is_valid_username(child_username):
+                            continue
+                        if children_for_parent >= max_secondary:
+                            break
+                        # Phase 10d: enforce the global subscan cap.
+                        # Once we've spawned ``max_total_subscans``
+                        # we stop accepting *new* candidates and emit
+                        # a synthetic SKIPPED row so the SPA can show
+                        # the operator that the cap kicked in.
+                        if subscan_count + len(sub_targets) >= max_total_subscans:
+                            skipped_payload = {
+                                "site": "graph_subscan_cap",
+                                "status": "skipped",
+                                "url": "",
+                                "url_main": "",
+                                "tags": [],
+                                "reason": "graph_subscan_cap",
+                                "parent_username": child_username,
+                                "discovered_via": parent_username,
+                                "depth": current_depth,
+                            }
+                            primary_results.append(skipped_payload)
+                            yield _sse_event("result", skipped_payload)
+                            capped_subscans += 1
+                            continue
+                        discovered[child_username] = evidence
+                        edge = {
+                            "parent_username": parent_username,
+                            "child_username": child_username,
+                            "evidence": evidence,
+                            "source_site": parent_payload["site"],
+                            "depth": current_depth,
+                        }
+                        edges.append(edge)
+                        yield _sse_event("edge", edge)
+                        sub_targets.append((parent_username, child_username, parent_payload))
+                        children_for_parent += 1
+
+                next_seeds: list[tuple[str, dict[str, Any]]] = []
+                for parent_username, child_username, _parent_payload in sub_targets:
+                    yield _sse_event(
+                        "secondary_start",
+                        {
+                            "parent_username": parent_username,
+                            "child_username": child_username,
+                            "total": len(sites),
+                            "depth": current_depth,
+                        },
+                    )
+                    async for sub in stream_checks(
+                        sites,
+                        child_username,
+                        client=client,
+                        extract=child_extract,
+                    ):
+                        sub_payload = sub.to_dict()
+                        sub_payload["parent_username"] = child_username
+                        sub_payload["discovered_via"] = parent_username
+                        sub_payload["depth"] = current_depth
+                        yield _sse_event("result", sub_payload)
+                        primary_results.append(sub_payload)
+                        # Phase 10d: gate spawning of the next
+                        # generation on the ``graph_secondary_min_confidence``
+                        # floor. The Phase 5h floor (default 60) only
+                        # gates the row from staying CLAIMED; this
+                        # tighter floor (default 80) gates whether a
+                        # CLAIMED child gets to spawn yet another
+                        # generation, since errors compound across
+                        # graph hops.
+                        if (
+                            current_depth < effective_depth
+                            and sub.status.value == "claimed"
+                            and sub.extracted
+                            and sub.confidence >= secondary_conf_floor
+                            and len(next_seeds) < effective_max_seed_hits
+                        ):
+                            next_seeds.append((child_username, sub_payload))
+                    subscan_count += 1
+
+                current_seeds = next_seeds
 
     # Phase 7a: stitch perceptual-hash edges between CLAIMED hits with
     # near-identical avatars. Runs after the recursive scan finishes so
@@ -821,6 +912,14 @@ async def _graph_search_stream(
             "edges": len(edges),
             "phash_edges": phash_edges_count,
             "secondary_count": len(discovered),
+            # Phase 10d: surface the (per-scan) deep-recursion stats
+            # so the SPA can render a "max depth=N, +K skipped (cap)"
+            # badge. ``capped_subscans`` is always 0 at depth=1 with
+            # default knobs, so existing behaviour stays observably
+            # the same for callers that never bump the depth knob.
+            "capped_subscans": capped_subscans,
+            "max_depth_reached": effective_depth,
+            "subscans_run": subscan_count,
             "scan_id": scan_id,
         },
     )
