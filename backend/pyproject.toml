@@ -32,6 +32,13 @@ dependencies = [
     # never needs scikit-learn — only training does.
     "onnxruntime>=1.18.0",
     "numpy>=1.26.0",
+    # Phase 7a: perceptual-hash graph stitching. Pillow is the only
+    # external image dep; the actual hash (8x8 dHash variant) is
+    # implemented in-module so we don't drag in scipy / PyWavelets via
+    # the larger ``imagehash`` package — the gain on a default-off
+    # admin knob isn't worth the ~30 MB Docker bloat. See
+    # ``app.imagephash`` for the algorithm and rationale.
+    "Pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]

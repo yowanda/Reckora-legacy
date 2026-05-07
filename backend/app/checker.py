@@ -950,6 +950,26 @@ async def check_site(
             primary.extracted = extract_identifiers(body, primary.url)
         except Exception:  # pragma: no cover - extractor must never break a scan
             primary.extracted = {}
+        # Phase 7a: opt-in avatar perceptual-hash capture. Only runs
+        # when the extractor pulled an ``avatar_url`` out of the page
+        # body — the open web doesn't have a stable convention for
+        # profile-image URLs, so when the extractor missed one we'd
+        # be guessing. Stored on the same ``extracted`` dict so it
+        # rides the existing serialization path through to
+        # ``CheckResult.to_dict`` and ``record_scan``.
+        if _admin_int("enable_image_phash") and primary.extracted:
+            avatar_url = primary.extracted.get("avatar_url")
+            if avatar_url:
+                from .imagephash import fetch_phash
+
+                phash = await fetch_phash(
+                    client,
+                    avatar_url,
+                    max_bytes=settings.image_phash_max_bytes,
+                    timeout=settings.image_phash_timeout,
+                )
+                if phash:
+                    primary.extracted["avatar_phash"] = phash
     # Phase 4: ML confidence. Skipped when the rule-based classifier
     # opted out (SKIPPED) or when extract+verify already concluded the
     # answer doesn't matter. We score every other status because the

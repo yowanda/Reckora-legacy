@@ -166,6 +166,37 @@ KNOBS: tuple[KnobSpec, ...] = (
             "limited egress."
         ),
     ),
+    KnobSpec(
+        key="enable_image_phash",
+        settings_attr="enable_image_phash",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 7a: when 1, /api/search/graph fetches the avatar "
+            "URL on every CLAIMED hit (when the extractor pass found "
+            "one) and computes a 64-bit perceptual hash. Pairs of "
+            "hits whose hashes differ by at most "
+            "``image_phash_max_distance`` bits get a ``phash_edge`` "
+            "stitched between them — strong evidence the same person "
+            "owns both accounts. Default off because the extra "
+            "HTTP-per-claim is not free."
+        ),
+    ),
+    KnobSpec(
+        key="image_phash_max_distance",
+        settings_attr="image_phash_max_distance",
+        minimum=0,
+        maximum=32,
+        description=(
+            "Phase 7a: maximum Hamming distance (0-32) on the 64-bit "
+            "dHash for two avatars to be considered the same person. "
+            "0 means byte-identical reuploads only; 6 (the default) "
+            "tolerates mild re-encoding / resizing; values past ~12 "
+            "start surfacing same-shape-different-person false "
+            "positives. Only consulted when ``enable_image_phash`` "
+            "is on."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

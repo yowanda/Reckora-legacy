@@ -8,6 +8,7 @@ import type {
   EffectiveSettings,
   GraphEdge,
   GraphExtracted,
+  GraphPhashEdge,
   IdentityType,
   Member,
   ProxyStatus,
@@ -357,6 +358,9 @@ function handleSseChunk(chunk: string, events: SearchEvents | GraphSearchEvents)
     case 'edge':
       e.onEdge?.(data as GraphEdge)
       break
+    case 'phash_edge':
+      e.onPhashEdge?.(data as GraphPhashEdge)
+      break
     case 'secondary_start':
       e.onSecondaryStart?.(
         data as { parent_username: string; child_username: string; total: number },
@@ -380,6 +384,9 @@ function handleSseChunk(chunk: string, events: SearchEvents | GraphSearchEvents)
 export interface GraphSearchEvents extends SearchEvents {
   onExtracted?: (e: GraphExtracted) => void
   onEdge?: (e: GraphEdge) => void
+  // Phase 7a: pHash-derived edge between two CLAIMED ``site:`` nodes
+  // whose avatars are within the configured Hamming distance.
+  onPhashEdge?: (e: GraphPhashEdge) => void
   onSecondaryStart?: (info: {
     parent_username: string
     child_username: string
@@ -389,6 +396,7 @@ export interface GraphSearchEvents extends SearchEvents {
     results: number
     cached?: boolean
     edges?: number
+    phash_edges?: number
     secondary_count?: number
   }) => void
 }

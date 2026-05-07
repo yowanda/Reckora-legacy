@@ -47,6 +47,7 @@ const INITIAL_GRAPH: GraphProgress = {
   state: 'idle',
   results: [],
   edges: [],
+  phashEdges: [],
   extracted: [],
   secondaryScans: {},
   doneCount: 0,
@@ -207,6 +208,8 @@ function SearchView() {
             setGraphProgress((g) => ({ ...g, extracted: [...g.extracted, e] })),
           onEdge: (e: GraphEdge) =>
             setGraphProgress((g) => ({ ...g, edges: [...g.edges, e] })),
+          onPhashEdge: (e) =>
+            setGraphProgress((g) => ({ ...g, phashEdges: [...g.phashEdges, e] })),
           onSecondaryStart: ({ child_username, total }) =>
             setGraphProgress((g) => ({
               ...g,

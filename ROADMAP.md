@@ -11,12 +11,12 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 
 | Field | Value |
 | --- | --- |
-| Repo HEAD on main | `784ac59` (Phase 5h-FE — SPA signal badges + Stats counters + Playwright e2e) |
-| HF Space HEAD | `784ac59` (mirrors main; Docker rebuilt + /api/health 200 verified) |
-| Active batch | **Phase 7 — intel & enrichment beyond maigret** |
-| Last batch shipped | Phase 6d — PDF export (weasyprint optional extra + 6 tests) |
-| Last update | 2026-05-06 (Phase 6d — PDF export) |
-| Test baseline | backend pytest **247 / 247** · mypy 18 src files · ruff clean · frontend lint+build green · e2e **4 / 4** |
+| Repo HEAD on main | `8faf4c8` (Phase 6d — PDF export via weasyprint) |
+| HF Space HEAD | `784ac59` (mirrors main through Phase 5h-FE; Phase 6 / 7a not yet redeployed) |
+| Active batch | **Phase 7b — WHOIS / HIBP-style breach enrichment for `identity_type=email`** |
+| Last batch shipped | Phase 7a — profile-image pHash graph stitching (Pillow-only dHash + 24 tests + Playwright e2e) |
+| Last update | 2026-05-07 (Phase 7a — pHash graph stitching) |
+| Test baseline | backend pytest **271 / 271** · mypy 19 src files · ruff clean · frontend lint+build green · e2e **5 / 5** |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
 HEAD on main` and `Last update` lines are updated at the end of every batch
@@ -56,12 +56,12 @@ once `command git push origin main` returns and CI is green.
 - [x] **6c** — head-to-head benchmark vs `soxoj/maigret` CLI (`docs/benchmark-phase-6.md`)
 - [x] **6d** — PDF export via weasyprint (optional `[pdf]` extra; graceful HTML fallback) + 6 tests
 
-### Phase 7 — intel & enrichment beyond maigret  *(planned)*
+### Phase 7 — intel & enrichment beyond maigret  *(in flight)*
 
 > **Goal:** capabilities `soxoj/maigret` does not have. Each sub-phase opens a new
 > dimension of OSINT signal.
 
-- [ ] **7a** — profile-image perceptual-hash (pHash) graph stitching
+- [x] **7a** — profile-image perceptual-hash (pHash) graph stitching (8x8 dHash via `app/imagephash.py`; admin knobs `enable_image_phash` + `image_phash_max_distance`; SPA renders dashed purple `phash_edge` between matching CLAIMED hits + `pHash matches` SidePanel stat; 24 new tests covering pure hash math, mocked HTTP fetch, SSE emission, and a Playwright e2e)
 - [ ] **7b** — WHOIS / HIBP-style breach enrichment for `identity_type=email`
 - [ ] **7c** — reverse-image lookup hook (Yandex / Google Lens)
 - [ ] **7d** — ML reranker retrain pipeline + drift detector
@@ -281,19 +281,45 @@ These are non-negotiable guards I run on **every** batch before pushing to `main
 > dimension of OSINT signal; Phase 7's dashboards leverage Phase 5d's admin knobs
 > for runtime tuning.
 
-### 7a — profile-image perceptual-hash (pHash) graph stitching
+### 7a — profile-image perceptual-hash (pHash) graph stitching  *(shipped)*
 
-- Extend `backend/app/extractor.py` to capture profile-image URLs (already
-  scraped via socid_extractor in some cases).
-- New `backend/app/imagephash.py` — fetches the image (`GET` with size limit),
-  computes a perceptual hash (`PIL` + `imagehash`), stores the 64-bit fingerprint
-  in `scans` history.
-- Graph view stitches an extra edge between two CLAIMED hits if their pHash
-  Hamming distance is `≤ 6` — strong signal that the same person owns both
-  accounts even if usernames differ.
-- Acceptance: Phase 3 graph view renders pHash-derived edges as a distinct
-  edge type; admin knob `image_phash_max_distance` (default `6`) tunes
-  sensitivity.
+- `backend/app/extractor.py` was already capturing `avatar_url` from
+  `og:image` meta tags + `socid_extractor`'s schemes; Phase 7a piggybacks
+  on that without changing the extractor.
+- New `backend/app/imagephash.py` — streams the avatar (size-capped,
+  short timeout, follow-redirects) and computes a 64-bit perceptual
+  fingerprint. Self-contained 8x8 dHash (resize → grayscale → left-vs-
+  right pixel comparison) so we ship just `Pillow` and skip the
+  `imagehash` package's scipy + PyWavelets dependency (~30 MB Docker
+  bloat we don't need on a default-off knob).
+- The hash is written to `CheckResult.extracted['avatar_phash']`, which
+  rides the existing serialization path through `to_dict` and
+  `record_scan`, so it persists in the `scans` history table without a
+  schema change.
+- `/api/search/graph` (`app/main.py`) collects every CLAIMED hit's
+  `avatar_phash`, runs `find_phash_edges` over the unordered pairs,
+  and emits a `phash_edge` SSE event per close pair (Hamming
+  `≤ image_phash_max_distance`). The terminal `done` payload picks up
+  a new `phash_edges` count.
+- SPA renders pHash edges as a distinct dashed purple stroke between
+  the two `site:` nodes, with a `↺ phash · d=N` label, and the
+  `GraphView` SidePanel surfaces a `pHash matches` stat plus a
+  helper-text mention of the new edge type.
+- Two admin knobs: `enable_image_phash` (default `0` — the extra
+  HTTP-per-claim is opt-in) and `image_phash_max_distance` (`0–32`,
+  default `6`).
+- Tests: `tests/test_imagephash.py` (20 cases) covers the pure hash
+  math, threshold semantics, length mismatches, mocked httpx fetches
+  (200 / 404 / oversized body / connect error / undecodable body);
+  `tests/test_graph_phash.py` (4 cases) drives the graph endpoint
+  with stubbed `stream_checks` results and asserts the `phash_edge`
+  SSE payload + `done.phash_edges` count under all knob/threshold
+  combinations; `frontend/e2e/phash-edge.spec.ts` exercises the full
+  SPA path with an intercepted graph stream and asserts the dashed
+  purple edge label + SidePanel `pHash matches` stat render.
+- Acceptance: ✅ Phase 3 graph view renders pHash-derived edges as a
+  distinct edge type; admin knob `image_phash_max_distance`
+  (default `6`) tunes sensitivity.
 
 ### 7b — WHOIS / HIBP-style breach enrichment for `identity_type=email`
 

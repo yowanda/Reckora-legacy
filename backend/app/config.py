@@ -116,6 +116,32 @@ class Settings(BaseSettings):
     enable_link_liveness: int = 1
     # Short timeout — the claim itself already paid for the slow path.
     link_liveness_timeout: float = 4.0
+    # Phase 7a: perceptual-hash graph stitching.
+    #
+    # When ``enable_image_phash`` is 1, every CLAIMED hit whose
+    # extractor pass produced an ``avatar_url`` triggers one extra
+    # bounded GET on that URL; the response body is fed through an
+    # 8x8 dHash to produce a 64-bit fingerprint stored on
+    # ``CheckResult.extracted['avatar_phash']``. The
+    # ``/api/search/graph`` stream then emits ``phash_edge`` events
+    # for every pair of CLAIMED hits whose hashes differ by at most
+    # ``image_phash_max_distance`` bits — strong evidence the same
+    # person owns both accounts even if usernames diverge. Default
+    # off because the extra HTTP-per-claim is not free; admins flip
+    # the knob via PATCH /api/admin/settings.
+    enable_image_phash: int = 0
+    # 0-32. 6 separates "same image, mild reencoding" from
+    # "different but similar avatars" reasonably well on the
+    # 64-bit dHash.
+    image_phash_max_distance: int = 6
+    # Hard cap on the avatar bytes we'll buffer per hit. Modern
+    # platforms usually serve avatars between 5-50 KB; 256 KB
+    # leaves comfortable headroom and prevents a malicious hit
+    # from streaming a 10 MB PNG into RAM.
+    image_phash_max_bytes: int = 262144
+    # Short timeout — the avatar fetch is enrichment, not a
+    # blocking part of the claim verification.
+    image_phash_timeout: float = 3.0
 
 
 settings = Settings()

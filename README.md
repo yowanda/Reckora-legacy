@@ -39,23 +39,26 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 2 — anti-bot & verify | shipped (bd7b768) | 2,506 | 0–100 | yes | yes (Firefox UA + rotated referrer) | yes (~928 sites) | yes (curl-cffi chrome131) | — | — |
 | 3 — extraction & graph | shipped | 2,506 | 0–100 | yes | yes | yes | yes | **yes (socid_extractor + react-flow)** | — |
 | 4 — beyond maigret | shipped | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes | **yes (ONNX) + admin live DB editor + scan-history diff** |
-| 5 — operator polish | shipped 7/8 (5f, 5d, 5c, 5e, 5b, 5a, **5g**) + **5h in flight** | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes (depth admin-tunable) | yes |
-| 6 — accuracy & gap closure vs maigret | planned ([ROADMAP](./ROADMAP.md)) | 3,000+ (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
-| 7 — intel & enrichment | planned ([ROADMAP](./ROADMAP.md)) | 3,000+ | 0–100 + ML retrained | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image |
+| 5 — operator polish | shipped (8/8: 5a–5h incl. 5h-A–E + 5h-FE + 5h-deploy) | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes (depth admin-tunable) | yes |
+| 6 — accuracy & gap closure vs maigret | shipped (4/4: 6a, 6b, 6c, 6d) | **2,506** (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
+| 7 — intel & enrichment | shipped 1/4 (**7a** — pHash graph stitching) + 7b–7d planned | 2,506+ | 0–100 + ML retrained | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image |
 | 8 — scale & infra | planned ([ROADMAP](./ROADMAP.md)) | 3,000+ | 0–100 + ML | yes (distributed worker fleet) | yes | yes | yes (rotating proxy) | yes | yes |
 
 > [`ROADMAP.md`](./ROADMAP.md) is the **single source of truth** for what's
 > in flight + planned. The "Live status" header at the top of the roadmap is
 > updated at the end of every batch (current `main` SHA, current HF Space
 > SHA, active batch, last batch shipped, test baseline). The master checklist
-> ticks off each sub-phase as it lands. Phase 5h is currently in flight —
-> it tightens the precision floor on the existing 2,506-site catalog so the
-> SPA's claimed bucket only contains hits the operator can click and
-> immediately see a real profile (no soft-404s, no dead links). Phase 6 closes
-> the remaining coverage gap with `soxoj/maigret`, Phase 7 pushes beyond it
-> on intel/enrichment, Phase 8 makes the platform horizontally scalable.
+> ticks off each sub-phase as it lands. Phase 5h shipped a precision floor
+> + link-liveness probe so the SPA's claimed bucket only contains hits the
+> operator can click and immediately see a real profile (no soft-404s, no
+> dead links); Phase 6 closed the coverage gap with `soxoj/maigret` (sites
+> regen, engine-aware probes, head-to-head benchmark, PDF export). Phase 7
+> is in flight — **7a** stitches CLAIMED hits whose profile-image perceptual
+> hashes match closely as a distinct edge type in the graph view, opening
+> a new dimension of OSINT signal beyond maigret. Phase 8 makes the
+> platform horizontally scalable.
 
-### Phase 5 — operator polish (7/8 sub-phases shipped, 5h in flight)
+### Phase 5 — operator polish (8/8 sub-phases shipped)
 
 Phase 5 lands as a stream of focused commits, each landing direct-to-main with
 its own CI green + auto-deploy to the HF Space. The sub-phase letters reflect

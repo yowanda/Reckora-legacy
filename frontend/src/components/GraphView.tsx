@@ -132,8 +132,20 @@ function layout(progress: GraphProgress) {
       .map((e) => e.site),
   )
   const sitesWithEdges = new Set(progress.edges.map((e) => e.source_site))
+  // Phase 7a: include sites referenced by pHash-derived edges so the
+  // dashed purple stitches always have both endpoints rendered.
+  const sitesWithPhashEdges = new Set<string>()
+  progress.phashEdges.forEach((e) => {
+    sitesWithPhashEdges.add(e.site_a)
+    sitesWithPhashEdges.add(e.site_b)
+  })
   const siteOrder = claimedPrimary
-    .filter((r) => sitesWithExtracts.has(r.site) || sitesWithEdges.has(r.site))
+    .filter(
+      (r) =>
+        sitesWithExtracts.has(r.site) ||
+        sitesWithEdges.has(r.site) ||
+        sitesWithPhashEdges.has(r.site),
+    )
     .slice(0, 12)
   const siteFallback = claimedPrimary
     .filter((r) => !siteOrder.includes(r))
@@ -173,6 +185,31 @@ function layout(progress: GraphProgress) {
       type: 'smoothstep',
       animated: false,
       style: { stroke: '#3f3f46', strokeWidth: 1.5 },
+    })
+  })
+
+  // Phase 7a: stitch pHash-derived edges between two ``site:`` nodes
+  // in the middle column. Skip pairs where one side isn't currently
+  // rendered (the layout caps at 12 sites) so the React-Flow edge
+  // doesn't dangle. Distinct purple stroke + dashed pattern + a
+  // "↺ phash" label keeps them visually separate from the green
+  // secondary edges below.
+  const renderedSites = new Set(sitesToRender.map((r) => r.site))
+  progress.phashEdges.forEach((edge) => {
+    if (!renderedSites.has(edge.site_a) || !renderedSites.has(edge.site_b)) {
+      return
+    }
+    edges.push({
+      id: `phash:${edge.site_a}::${edge.site_b}`,
+      source: `site:${edge.site_a}`,
+      target: `site:${edge.site_b}`,
+      label: `↺ phash · d=${edge.hamming}`,
+      type: 'straight',
+      animated: false,
+      style: { stroke: '#a855f7', strokeWidth: 1.5, strokeDasharray: '6 4' },
+      labelStyle: { fill: '#c4b5fd', fontSize: 10, fontFamily: 'ui-monospace, monospace' },
+      labelBgStyle: { fill: '#0a0a0a', fillOpacity: 0.9 },
+      data: { kind: 'phash' },
     })
   })
 
@@ -341,10 +378,12 @@ function SidePanel({
         <Stat label="extracted" value={extractedCount} />
         <Stat label="recursion edges" value={recursionFanout} />
         <Stat label="secondary CLAIMED" value={secondaryClaimed.length} />
+        <Stat label="pHash matches" value={progress.phashEdges.length} />
       </div>
       <p className="text-xs text-zinc-500">
         Click a CLAIMED site node to inspect the identifiers Reckora extracted from its page body.
-        Green edges show secondary usernames Reckora discovered and rescanned.
+        Green edges show secondary usernames Reckora discovered and rescanned; dashed purple edges
+        connect CLAIMED hits whose profile-image perceptual hashes match closely.
       </p>
     </div>
   )

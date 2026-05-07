@@ -322,6 +322,20 @@ export interface GraphEdge {
   source_site: string
 }
 
+// Phase 7a: an edge stitched between two CLAIMED ``site:`` nodes when
+// their avatar perceptual hashes are within ``image_phash_max_distance``
+// bits of each other. ``parent_username_*`` is the username under which
+// each side of the pair was discovered (the root for primary CLAIMED
+// hits; the child handle for secondary scans).
+export interface GraphPhashEdge {
+  site_a: string
+  site_b: string
+  parent_username_a: string | null
+  parent_username_b: string | null
+  hamming: number
+  max_distance: number
+}
+
 export interface GraphExtracted {
   parent_username: string
   site: string
@@ -362,6 +376,9 @@ export interface GraphProgress {
   error?: string
   results: CheckResult[]
   edges: GraphEdge[]
+  // Phase 7a: avatar-pHash-derived stitches between CLAIMED hits.
+  // Empty when ``enable_image_phash`` is off (the default).
+  phashEdges: GraphPhashEdge[]
   extracted: GraphExtracted[]
   // Map of secondary username -> total sites being scanned (announced
   // via ``secondary_start``). Used by the UI to show which sub-scans

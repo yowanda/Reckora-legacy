@@ -648,6 +648,61 @@ async def _graph_search_stream(
                     yield _sse_event("result", sub_payload)
                     primary_results.append(sub_payload)
 
+    # Phase 7a: stitch perceptual-hash edges between CLAIMED hits with
+    # near-identical avatars. Runs after the recursive scan finishes so
+    # secondary CLAIMED hits are eligible too (their ``parent_username``
+    # is set to the child handle by ``_graph_search_stream``). The
+    # admin knob is checked again here even though ``check_site`` only
+    # populates ``avatar_phash`` when it's on, because the secondary
+    # ``stream_checks`` call is invoked with ``extract=False`` and can
+    # never produce hashes — so the work below is a no-op for those
+    # rows by construction.
+    phash_edges_count = 0
+    if knobs.get("enable_image_phash"):
+        from .imagephash import find_phash_edges
+
+        phash_max_distance = knobs.get(
+            "image_phash_max_distance",
+            settings.image_phash_max_distance,
+        )
+        # Build (key, hash) pairs; key is the site name so the SPA can
+        # use the same ``site:`` node ids in both the structural and
+        # phash-derived edges. Skip non-CLAIMED rows and rows whose
+        # extractor pass missed an avatar.
+        keyed_hashes: list[tuple[str, str]] = []
+        # Map site -> result payload for evidence + parent-username
+        # echo on the edge event.
+        result_by_site: dict[str, dict[str, Any]] = {}
+        for payload in primary_results:
+            if payload.get("status") != "claimed":
+                continue
+            extracted = payload.get("extracted") or {}
+            phash = extracted.get("avatar_phash")
+            if not phash:
+                continue
+            site = payload["site"]
+            # Two CLAIMED hits on the same site (primary vs secondary)
+            # would both register here; keep the first occurrence so
+            # the edge keys remain stable and we don't self-edge.
+            if site in result_by_site:
+                continue
+            result_by_site[site] = payload
+            keyed_hashes.append((site, phash))
+
+        for site_a, site_b, distance in find_phash_edges(
+            keyed_hashes, max_distance=phash_max_distance
+        ):
+            edge_payload = {
+                "site_a": site_a,
+                "site_b": site_b,
+                "parent_username_a": result_by_site[site_a].get("parent_username"),
+                "parent_username_b": result_by_site[site_b].get("parent_username"),
+                "hamming": distance,
+                "max_distance": phash_max_distance,
+            }
+            yield _sse_event("phash_edge", edge_payload)
+            phash_edges_count += 1
+
     scan_id: int | None = None
     if member is not None:
         scan_id = history_mod.record_scan(
@@ -664,6 +719,7 @@ async def _graph_search_stream(
         {
             "results": len(primary_results),
             "edges": len(edges),
+            "phash_edges": phash_edges_count,
             "secondary_count": len(discovered),
             "scan_id": scan_id,
         },
