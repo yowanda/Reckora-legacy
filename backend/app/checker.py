@@ -92,6 +92,7 @@ def check_result_from_dict(payload: dict[str, Any]) -> CheckResult:
         verified=payload.get("verified"),
         extracted=payload.get("extracted"),
         ml_confidence=payload.get("ml_confidence"),
+        reason=payload.get("reason"),
     )
 
 
@@ -452,6 +453,19 @@ class CheckResult:
     # authoritative; ``ml_confidence`` is shown side-by-side in the SPA
     # and a diverging value adds a ``ml-disagree`` signal.
     ml_confidence: int | None = None
+    # Phase 9d: structured anti-bot reason code, surfaced when the
+    # CAPTCHA classifier (``app.captcha_signatures``) recognises a
+    # vendor-specific challenge in the response body. ``None`` means
+    # either the classifier was disabled (default) or no signature
+    # matched; otherwise the value is ``"captcha_<vendor>"`` where
+    # ``<vendor>`` is one of the names returned by
+    # :func:`app.captcha_signatures.known_vendors` (e.g. ``recaptcha_v2``
+    # / ``hcaptcha`` / ``turnstile``). The SPA renders a vendor-aware
+    # badge from this string, and ``/api/admin/ml/status`` reports a
+    # rolling per-vendor counter for the same vocabulary so an operator
+    # can see e.g. ``"47 sites returned cloudflare turnstile this week"``
+    # without scrolling through individual scan results.
+    reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -469,6 +483,7 @@ class CheckResult:
             "verified": self.verified,
             "extracted": self.extracted,
             "ml_confidence": self.ml_confidence,
+            "reason": self.reason,
         }
 
 
@@ -925,9 +940,33 @@ async def check_site(
         blocked_signals.append("status-451")
     elif resp.status_code == 403 and site.ignore_403:
         blocked_signals.append("status-403-ignored")
-    if body and _is_blocked_body(body):
-        blocked_signals.append("body-fingerprint-block")
+    # Phase 9d: vendor-specific CAPTCHA classifier. Only consulted when
+    # the ``enable_captcha_classifier`` admin knob is on; otherwise the
+    # generic ``_is_blocked_body`` fingerprint scan is the only body
+    # check. When the classifier is enabled and matches, the BLOCKED
+    # branch fires even if ``_is_blocked_body`` would not have — that's
+    # how new vendors (Datadome / Cloudflare Turnstile / FunCaptcha)
+    # not present in ``_BLOCK_FINGERPRINTS`` get a structured reason.
+    captcha_vendor: str | None = None
+    if body:
+        if _is_blocked_body(body):
+            blocked_signals.append("body-fingerprint-block")
+        if _admin_int("enable_captcha_classifier"):
+            from . import captcha_signatures as _captcha
+
+            captcha_vendor = _captcha.classify(body)
+            if captcha_vendor is not None and "body-fingerprint-block" not in blocked_signals:
+                blocked_signals.append("body-fingerprint-block")
     if blocked_signals:
+        blocked_reason: str | None = None
+        if captcha_vendor is not None:
+            from . import captcha_signatures as _captcha
+
+            # Vendor-specific reason ALWAYS wins over the generic
+            # ``body-fingerprint-block`` signal when both fire — the
+            # SPA renders a vendor-aware badge from this string.
+            blocked_reason = f"captcha_{captcha_vendor}"
+            _captcha.record_vendor(captcha_vendor)
         blocked_result = CheckResult(
             site=site.name,
             status=Status.BLOCKED,
@@ -939,6 +978,7 @@ async def check_site(
             confidence=_confidence(site, Status.BLOCKED, resp.status_code, blocked_signals),
             signals=blocked_signals,
             attempts=attempts,
+            reason=blocked_reason,
         )
         # Phase 2.2: rescue with curl-cffi (Chrome TLS impersonation).
         # We only call rescue on real BLOCKED, never on the 403-ignored

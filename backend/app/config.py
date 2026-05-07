@@ -414,5 +414,27 @@ class Settings(BaseSettings):
     # which preferred region) the in-flight request belongs to.
     enable_geo_aware_proxy: int = 0
 
+    # Phase 9d: vendor-specific CAPTCHA classifier (closes residual
+    # risk M3 silent UNKNOWN on CAPTCHA challenge; MEDIUM).
+    #
+    # When ``enable_captcha_classifier`` is 1, the per-site checker
+    # consults :mod:`app.captcha_signatures` against the response body
+    # whenever the BLOCKED branch could fire. A vendor-specific
+    # signature match (reCAPTCHA v2 / v3, hCaptcha, Cloudflare
+    # Turnstile, Datadome, AWS WAF Captcha, FunCaptcha, Geetest,
+    # PerimeterX, generic ``<form action="/captcha">``) sets the
+    # new ``CheckResult.reason`` field to ``"captcha_<vendor>"`` so
+    # the SPA can render a vendor-aware badge instead of the generic
+    # ``body-fingerprint-block`` signal. Per-vendor counts surface
+    # via ``GET /api/admin/ml/status.captcha_vendors_seen`` so an
+    # operator can see e.g. "47 sites returned Cloudflare Turnstile
+    # this week".
+    #
+    # Default ``0`` keeps the runtime byte-for-byte equivalent to the
+    # pre-9d behaviour — the classifier module is never imported on
+    # the hot path, ``CheckResult.reason`` stays ``None``, and the
+    # admin endpoint reports an empty ``captcha_vendors_seen`` map.
+    enable_captcha_classifier: int = 0
+
 
 settings = Settings()

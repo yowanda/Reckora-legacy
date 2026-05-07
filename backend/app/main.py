@@ -1224,7 +1224,16 @@ async def admin_patch_settings(
 async def admin_ml_status(
     _: Member = Depends(current_admin),
 ) -> dict[str, Any]:
-    """Model age, last retrain, current drift report."""
+    """Model age, last retrain, current drift report.
+
+    Phase 9d also surfaces ``captcha_vendors_seen`` — a rolling
+    in-process per-vendor counter populated by the CAPTCHA classifier
+    (:mod:`app.captcha_signatures`). The map is empty until the
+    ``enable_captcha_classifier`` admin knob is on AND a probe
+    actually hits a recognised vendor signature, so an operator
+    running the Phase 9d default-off path sees ``{}`` here.
+    """
+    from . import captcha_signatures as captcha_mod
     from . import ml as ml_mod
     from . import ml_drift as drift_mod
     from . import ml_retrain as retrain_mod
@@ -1238,6 +1247,7 @@ async def admin_ml_status(
         "model_age_days": retrain_mod.model_age_days(),
         "last_retrain": last.to_dict() if last else None,
         "drift": report.to_dict(),
+        "captcha_vendors_seen": captcha_mod.vendor_counts(),
     }
 
 

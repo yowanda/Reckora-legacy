@@ -503,6 +503,27 @@ KNOBS: tuple[KnobSpec, ...] = (
             "through."
         ),
     ),
+    KnobSpec(
+        key="enable_captcha_classifier",
+        settings_attr="enable_captcha_classifier",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 9d: when 1, the per-site checker consults the "
+            "vendor-specific CAPTCHA classifier (``app.captcha_signatures``) "
+            "against every probe body that could fall into the BLOCKED "
+            'branch and surfaces a structured ``reason="captcha_<vendor>"`` '
+            "string on the result so the SPA can render a vendor-aware "
+            "badge (reCAPTCHA v2 / v3, hCaptcha, Cloudflare Turnstile, "
+            "Datadome, AWS WAF Captcha, FunCaptcha, Geetest, PerimeterX, "
+            'generic ``<form action="/captcha">``). Per-vendor counts '
+            "are exposed via ``GET /api/admin/ml/status.captcha_vendors_seen`` "
+            "so an operator can see which CAPTCHA fleets are pushing "
+            "the most BLOCKED rows this week. Off by default — when "
+            "off, the classifier is never imported on the hot path "
+            "and ``CheckResult.reason`` stays ``None``."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

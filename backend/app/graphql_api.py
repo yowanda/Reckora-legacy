@@ -179,6 +179,12 @@ class CheckResultInfo:
     attempts: int
     verified: bool | None
     ml_confidence: int | None
+    # Phase 9d: structured anti-bot reason code emitted by the
+    # CAPTCHA classifier (``app.captcha_signatures``). ``None`` when
+    # the classifier is disabled or no vendor signature matched;
+    # otherwise ``"captcha_<vendor>"`` (see
+    # ``app.captcha_signatures.known_vendors``).
+    reason: str | None
 
 
 @strawberry.type
@@ -254,6 +260,7 @@ def _result_to_info(payload: dict[str, Any]) -> CheckResultInfo:
         attempts=int(payload.get("attempts") or 1),
         verified=payload.get("verified"),
         ml_confidence=payload.get("ml_confidence"),
+        reason=payload.get("reason"),
     )
 
 
