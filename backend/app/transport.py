@@ -80,7 +80,15 @@ class RotatingProxyTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         host = request.url.host
         await host_rate_limit.get_limiter().acquire(host)
-        proxy_url = self._select_proxy()
+        proxy_url = self._select_proxy(request)
+        # Phase 9a / 9c: ``X-Reckora-Site-Name`` is an internal-only
+        # routing header. ``_select_proxy`` already consumed it (geo-
+        # aware lookup); :class:`AntiBotTransport` strips it again on
+        # its own egress, but when the anti-bot stack is off the
+        # downstream is plain httpx, so we strip the header here too
+        # to make sure it never leaves the process over the wire.
+        if "x-reckora-site-name" in request.headers:
+            del request.headers["x-reckora-site-name"]
         transport = self._transport_for(proxy_url)
         try:
             response = await transport.handle_async_request(request)
@@ -101,19 +109,29 @@ class RotatingProxyTransport(httpx.AsyncBaseTransport):
     # Internals
     # ------------------------------------------------------------------
 
-    def _select_proxy(self) -> str | None:
+    def _select_proxy(self, request: httpx.Request) -> str | None:
         """Pick the URL for *this* request.
 
         Order of precedence:
 
         1. Phase 8b pool when ``enable_proxy_rotator=1`` and the pool
-           has at least one URL.
+           has at least one URL. Phase 9c: when
+           ``enable_geo_aware_proxy=1`` and the request carries the
+           internal ``X-Reckora-Site-Name`` header, the pool consults
+           that site's ``preferredRegion`` site override and prefers a
+           proxy whose region tag matches; falls back through the
+           ``"default"`` region and then any healthy URL so a typo or
+           a single-region pool never fail-closes the probe.
         2. Phase 5e single-proxy gate
            (:func:`app.proxy.proxy_url_or_none`).
         3. ``None`` — direct egress.
         """
         if proxy_pool.is_enabled():
-            url = proxy_pool.get_pool().acquire()
+            preferred_region: str | None = None
+            if proxy_pool.is_geo_aware_enabled():
+                site_name = request.headers.get("x-reckora-site-name")
+                preferred_region = proxy_pool.preferred_region_for_site(site_name)
+            url = proxy_pool.get_pool().acquire(preferred_region=preferred_region)
             if url is not None:
                 return url
         return proxy_mod.proxy_url_or_none()

@@ -164,6 +164,14 @@ _ALLOWED_PATCH_KEYS: frozenset[str] = frozenset(
         # at resolve time so a typo silently falls back to the
         # global default.
         "antiBotProfile",
+        # Phase 9c: per-site preferred proxy egress region. Free-form
+        # string matched (case-insensitive) against the region tags
+        # parsed from ``RECKORA_PROXY_POOL_URLS`` (e.g. ``"us-east"``,
+        # ``"ru"``, ``"jp"``); on no-match the proxy pool falls back
+        # through ``"default"`` then any healthy URL so a typo never
+        # fail-closes a probe. Only consulted when
+        # ``enable_geo_aware_proxy=1``.
+        "preferredRegion",
     }
 )
 

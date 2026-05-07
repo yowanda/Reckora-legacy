@@ -483,6 +483,26 @@ KNOBS: tuple[KnobSpec, ...] = (
             "for HF Space's single-container deployment."
         ),
     ),
+    KnobSpec(
+        key="enable_geo_aware_proxy",
+        settings_attr="enable_geo_aware_proxy",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 9c: when 1, the Phase 8b proxy pool selects an "
+            "egress URL whose region tag matches the target site's "
+            "``preferredRegion`` site override (falling back to the "
+            "``default`` region, then to any healthy URL). Pool URLs "
+            "are tagged via the ``region:scheme://host:port`` syntax in "
+            "``RECKORA_PROXY_POOL_URLS`` (bare URLs continue to work "
+            'and are tagged ``region="default"``). Off by default — '
+            "the round-robin behaviour from 8b is preserved unless an "
+            "operator explicitly opts in. Useful for catalogs with "
+            "geo-locked sites (Yandex, VK, Naver, Sina Weibo, …) where "
+            "an EU exit IP gets blocked but a regional proxy gets "
+            "through."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

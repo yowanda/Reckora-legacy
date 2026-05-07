@@ -51,6 +51,24 @@ from itertools import cycle
 
 from .config import settings
 
+# ---------------------------------------------------------------------------
+# Phase 9c: region tag parsing.
+#
+# The Phase 8b pool URL list is a flat ``","``-separated string of httpx-
+# compatible URLs. Phase 9c extends the parser to optionally accept a
+# leading ``"<region>:"`` tag on each entry — e.g.
+# ``"us-east:socks5://a.example,ru:socks5://b.example,socks5://c.example"``
+# parses to three entries with regions ``"us-east"``, ``"ru"``, and
+# ``"default"`` (the bare URL keeps the legacy single-region semantics so
+# operators upgrading from 8b see no behaviour change). The parser tells
+# a region tag apart from a URL scheme by enforcing a small allowlist of
+# accepted httpx schemes — anything else before the first ``":"`` is
+# treated as a region label.
+# ---------------------------------------------------------------------------
+
+_DEFAULT_REGION: str = "default"
+_URL_SCHEMES: frozenset[str] = frozenset({"http", "https", "socks4", "socks5", "socks5h"})
+
 
 @dataclass(slots=True)
 class _ProxyState:
@@ -59,6 +77,7 @@ class _ProxyState:
     url: str
     cooldown_until: float = 0.0
     consecutive_failures: int = 0
+    region: str = _DEFAULT_REGION
 
 
 @dataclass(slots=True)
@@ -77,6 +96,7 @@ class ProxyPool:
     """
 
     urls: tuple[str, ...]
+    regions: dict[str, str] = field(default_factory=dict)
     _state: dict[str, _ProxyState] = field(default_factory=dict)
     _cursor: Iterator[str] | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
@@ -84,23 +104,74 @@ class ProxyPool:
     def __post_init__(self) -> None:
         # Stable iteration order; ``cycle`` over ``self.urls`` keeps
         # round-robin deterministic across calls.
-        self._state = {u: _ProxyState(url=u) for u in self.urls}
+        self._state = {
+            u: _ProxyState(url=u, region=self.regions.get(u, _DEFAULT_REGION)) for u in self.urls
+        }
         self._cursor = cycle(self.urls) if self.urls else None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def acquire(self, *, now: float | None = None) -> str | None:
+    def acquire(
+        self,
+        *,
+        now: float | None = None,
+        preferred_region: str | None = None,
+    ) -> str | None:
         """Return the next eligible proxy URL, or ``None`` for direct.
 
         ``None`` is returned when the pool is empty *or* every URL is
         currently in cooldown (fail-open, see module docstring).
+
+        Phase 9c: when ``preferred_region`` is set the pool walks the
+        cursor in three passes:
+
+        1. **Region match** — first healthy URL whose region equals
+           ``preferred_region`` (case-insensitive).
+        2. **Default region** — first healthy URL tagged
+           ``"default"`` (i.e. URLs without a region prefix in the
+           env, which is the Phase 8b behaviour).
+        3. **Any healthy URL** — last-resort sweep so a single-region
+           pool still works.
+
+        Each pass advances the same round-robin cursor so two passes
+        never re-pick the same URL within one call. When
+        ``preferred_region=None`` the method collapses to the Phase 8b
+        single-pass round-robin (preserves bit-for-bit behaviour when
+        ``enable_geo_aware_proxy=0``).
         """
         if not self.urls or self._cursor is None:
             return None
         ts = now if now is not None else time.monotonic()
+        # Phase 8b single-pass fast path — preferred region not
+        # supplied, so don't pay the three-pass cost.
+        if preferred_region is None:
+            with self._lock:
+                for _ in range(len(self.urls)):
+                    url = next(self._cursor)
+                    state = self._state[url]
+                    if state.cooldown_until <= ts:
+                        return url
+            return None
+        target = preferred_region.strip().lower()
         with self._lock:
+            # Pass 1: region match.
+            for _ in range(len(self.urls)):
+                url = next(self._cursor)
+                state = self._state[url]
+                if state.cooldown_until <= ts and state.region.lower() == target:
+                    return url
+            # Pass 2: default region (only if the operator hasn't
+            # already asked for ``"default"`` — that pass is identical
+            # to pass 1).
+            if target != _DEFAULT_REGION:
+                for _ in range(len(self.urls)):
+                    url = next(self._cursor)
+                    state = self._state[url]
+                    if state.cooldown_until <= ts and state.region.lower() == _DEFAULT_REGION:
+                        return url
+            # Pass 3: any healthy URL (fail-open last resort).
             for _ in range(len(self.urls)):
                 url = next(self._cursor)
                 state = self._state[url]
@@ -160,8 +231,24 @@ class ProxyPool:
                         "in_cooldown": remaining > 0,
                         "cooldown_remaining_sec": round(remaining, 2),
                         "consecutive_failures": state.consecutive_failures,
+                        "region": state.region,
                     }
                 )
+        return out
+
+    def geo_distribution(self) -> dict[str, int]:
+        """Return ``{region: count}`` over the configured URLs.
+
+        Surfaced on ``/api/health.proxy_pool.geo_distribution`` so a
+        dashboard can quickly verify the pool covers the regions the
+        operator expects (no proxies tagged ``"ru"`` means a Yandex
+        probe is going to fall back to the default region or direct
+        egress, which is useful to see at a glance).
+        """
+        out: dict[str, int] = {}
+        with self._lock:
+            for state in self._state.values():
+                out[state.region] = out.get(state.region, 0) + 1
         return out
 
 
@@ -172,20 +259,63 @@ class ProxyPool:
 _pool_lock = threading.Lock()
 _pool: ProxyPool | None = None
 
+# Phase 9c: cached site-name → preferred-region map. Built lazily
+# from ``site_overrides.list_overrides()`` and refreshed every
+# ``_REGION_CACHE_TTL_SEC`` seconds so a hot-path scan doesn't hit
+# SQLite per request. Mutations to site overrides invalidate the
+# cache via :func:`reset_pool_for_tests` (tests) and via the
+# ``reload_catalog`` hook (production — see
+# ``main.admin_upsert_site_override``).
+_REGION_CACHE_TTL_SEC: float = 30.0
+_region_cache_lock = threading.Lock()
+_region_cache: dict[str, str] = {}
+_region_cache_built_at: float = 0.0
 
-def _parse_pool_urls(raw: str) -> tuple[str, ...]:
-    """Split a ``RECKORA_PROXY_POOL_URLS`` value into a tuple.
+
+def _parse_pool_entry(entry: str) -> tuple[str, str]:
+    """Return ``(url, region)`` for one ``RECKORA_PROXY_POOL_URLS`` entry.
+
+    Accepts both ``"us-east:socks5://a.example"`` (region-tagged) and
+    ``"socks5://a.example"`` (bare URL → ``"default"`` region). The
+    region/scheme split is decided by checking the first segment
+    against :data:`_URL_SCHEMES` — anything else before the first
+    ``":"`` is a region tag.
+    """
+    head, sep, tail = entry.partition(":")
+    if not sep:
+        return entry, _DEFAULT_REGION
+    if head.lower() in _URL_SCHEMES:
+        return entry, _DEFAULT_REGION
+    return tail.lstrip(), head.strip().lower() or _DEFAULT_REGION
+
+
+def _parse_pool_urls(raw: str) -> tuple[tuple[str, ...], dict[str, str]]:
+    """Split a ``RECKORA_PROXY_POOL_URLS`` value into URLs + regions.
 
     Accepts comma-separated URLs with optional whitespace; empty parts
     and lone ``,`` are skipped so an operator can leave a trailing
-    comma in their env file without breaking the pool.
+    comma in their env file without breaking the pool. Each entry is
+    parsed via :func:`_parse_pool_entry` so a leading ``region:``
+    prefix is recognised. The returned ``regions`` dict maps
+    ``url -> region`` for the URLs in the tuple.
     """
     parts = [p.strip() for p in (raw or "").split(",")]
-    return tuple(p for p in parts if p)
+    urls: list[str] = []
+    regions: dict[str, str] = {}
+    for part in parts:
+        if not part:
+            continue
+        url, region = _parse_pool_entry(part)
+        if not url:
+            continue
+        urls.append(url)
+        regions[url] = region
+    return tuple(urls), regions
 
 
 def _build_pool() -> ProxyPool:
-    return ProxyPool(urls=_parse_pool_urls(settings.proxy_pool_urls))
+    urls, regions = _parse_pool_urls(settings.proxy_pool_urls)
+    return ProxyPool(urls=urls, regions=regions)
 
 
 def get_pool() -> ProxyPool:
@@ -205,9 +335,12 @@ def reset_pool_for_tests() -> None:
     that patch ``settings.proxy_pool_urls`` get a fresh pool on every
     test instead of one another's leftover state.
     """
-    global _pool
+    global _pool, _region_cache, _region_cache_built_at
     with _pool_lock:
         _pool = None
+    with _region_cache_lock:
+        _region_cache = {}
+        _region_cache_built_at = 0.0
 
 
 def _enabled_knob() -> int:
@@ -226,6 +359,59 @@ def is_enabled() -> bool:
     return bool(get_pool().urls) and _enabled_knob() == 1
 
 
+def _geo_aware_knob() -> int:
+    """Phase 9c: read the ``enable_geo_aware_proxy`` knob."""
+    from . import admin_settings as admin_settings_mod
+
+    try:
+        return admin_settings_mod.effective_int("enable_geo_aware_proxy")
+    except Exception:
+        return int(settings.enable_geo_aware_proxy)
+
+
+def is_geo_aware_enabled() -> bool:
+    """``True`` when geo-aware selection is on **and** the rotator is
+    active. Callers use this to gate the ``preferred_region`` lookup.
+    """
+    return is_enabled() and _geo_aware_knob() == 1
+
+
+def preferred_region_for_site(site_name: str | None) -> str | None:
+    """Look up the ``preferredRegion`` site override for ``site_name``.
+
+    The lookup walks ``site_overrides.list_overrides()`` once per
+    :data:`_REGION_CACHE_TTL_SEC` (30s default) and caches the
+    site-name → region map in-process. Returns ``None`` when the
+    knob is off, ``site_name`` is empty, or the site has no override.
+
+    Phase 9c never hits the SQLite override table on the request hot
+    path; the cache costs one DB scan every 30s no matter how many
+    sites are scanned.
+    """
+    if not site_name:
+        return None
+    global _region_cache, _region_cache_built_at
+    now = time.monotonic()
+    with _region_cache_lock:
+        if now - _region_cache_built_at > _REGION_CACHE_TTL_SEC:
+            try:
+                from . import site_overrides as site_overrides_mod
+
+                fresh: dict[str, str] = {}
+                for o in site_overrides_mod.list_overrides():
+                    region = o.patch.get("preferredRegion")
+                    if isinstance(region, str) and region.strip():
+                        fresh[o.name.lower()] = region.strip().lower()
+                _region_cache = fresh
+                _region_cache_built_at = now
+            except Exception:
+                # Fall through to the previous cache snapshot — being
+                # briefly stale is better than failing every probe
+                # because the override table is locked.
+                _region_cache_built_at = now
+        return _region_cache.get(site_name.lower())
+
+
 def status() -> dict[str, object]:
     """Compact descriptor for ``/api/health`` and the SPA."""
     pool = get_pool()
@@ -234,4 +420,7 @@ def status() -> dict[str, object]:
         "enabled": _enabled_knob() == 1,
         "active": is_enabled(),
         "members": pool.health(),
+        "geo_aware_enabled": _geo_aware_knob() == 1,
+        "geo_aware_active": is_geo_aware_enabled(),
+        "geo_distribution": pool.geo_distribution(),
     }

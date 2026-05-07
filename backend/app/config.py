@@ -390,5 +390,29 @@ class Settings(BaseSettings):
     host_rate_limit_use_redis: int = 0
     host_rate_limit_redis_url: str = ""
 
+    # Phase 9c: geo-aware proxy selection (closes residual risk M2
+    # round-robin pool ignores region locks; MEDIUM).
+    #
+    # Phase 8b's ``proxy_pool`` rotates URLs round-robin without
+    # caring about egress region. That means a Yandex / VK probe
+    # may exit through an EU proxy and trip the geo filter even
+    # though a "ru" proxy is sitting idle in the same pool. 9c
+    # extends the pool URL parser to accept a ``region:url``
+    # prefix (e.g. ``"us-east:socks5://a.example,ru:socks5://b.example"``)
+    # and a per-site ``site_overrides.<name>.patch.preferredRegion``
+    # tag; selection prefers a proxy whose region matches the
+    # site's preferred region, falls back to the ``"default"``
+    # region, then to any healthy proxy as a last resort so a
+    # single-region pool still works.
+    #
+    # Default ``enable_geo_aware_proxy=0`` preserves the Phase 8b
+    # round-robin behaviour bit-for-bit. Operators with a
+    # multi-region pool flip the knob to ``1`` and tag relevant
+    # sites via the existing site-override admin UI; the
+    # ``X-Reckora-Site-Name`` request header set by the checker is
+    # how the transport layer knows which site (and therefore
+    # which preferred region) the in-flight request belongs to.
+    enable_geo_aware_proxy: int = 0
+
 
 settings = Settings()

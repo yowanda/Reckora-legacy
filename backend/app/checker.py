@@ -836,6 +836,16 @@ async def check_site(
         "Accept-Encoding": "gzip, deflate, br",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
+        # Phase 9a / 9c: internal-only routing header. Consumed by
+        # ``app.transport.RotatingProxyTransport._select_proxy`` (geo-
+        # aware proxy selection) and
+        # ``app.anti_bot_transport.AntiBotTransport._resolve_profile``
+        # (per-site impersonation override) so they can look up the
+        # site's overrides without re-deriving the site name from the
+        # request URL. ``AntiBotTransport.handle_async_request``
+        # strips the header before dispatching downstream so it is
+        # never forwarded over the wire.
+        "X-Reckora-Site-Name": site.name,
     }
     headers.update(dict(site.headers))
 

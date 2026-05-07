@@ -32,16 +32,27 @@ def _reset_pool_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 
 def test_parse_pool_urls_handles_empty_env() -> None:
-    assert proxy_pool._parse_pool_urls("") == ()
+    # Phase 9c: ``_parse_pool_urls`` now returns ``(urls, regions)``.
+    # An empty env => empty urls + empty regions map.
+    assert proxy_pool._parse_pool_urls("") == ((), {})
 
 
 def test_parse_pool_urls_strips_whitespace_and_empty_parts() -> None:
     raw = "  socks5://a:1, , http://b:2 ,,socks5h://c:3,"
-    assert proxy_pool._parse_pool_urls(raw) == (
+    urls, regions = proxy_pool._parse_pool_urls(raw)
+    assert urls == (
         "socks5://a:1",
         "http://b:2",
         "socks5h://c:3",
     )
+    # Bare URLs (no leading region tag) all get the ``"default"``
+    # region so the Phase 8b round-robin behaviour is preserved when
+    # operators upgrade without changing their env.
+    assert regions == {
+        "socks5://a:1": "default",
+        "http://b:2": "default",
+        "socks5h://c:3": "default",
+    }
 
 
 # ---------------------------------------------------------------------------
