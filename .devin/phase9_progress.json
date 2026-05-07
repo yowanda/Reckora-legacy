@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-05-07T05:40:00Z",
+  "last_updated": "2026-05-07T05:45:00Z",
   "session": {
     "devin_session_url": "https://app.devin.ai/sessions/bb4783634e7f4a6788ec51e61926a8eb",
     "git_author": "yowanda <yodadwi4@gmail.com>",
@@ -9,7 +9,7 @@
   },
   "repo": {
     "url": "https://github.com/yowanda/Reckora",
-    "head": "b6073af",
+    "head": "3d75879",
     "live_demo": "https://yesmyyt-cacadoxx.hf.space"
   },
   "test_baseline": {
@@ -33,12 +33,12 @@
     "9b": {
       "title": "distributed host rate limit (Redis sliding-window)",
       "residual_risk_closed": ["M1 (per-process token bucket)"],
-      "status": "feat shipped, awaiting e2e CI",
+      "status": "shipped",
       "feat_commit": "b6073af",
       "feat_commit_url": "https://github.com/yowanda/Reckora/commit/b6073af",
-      "docs_commit": null,
-      "docs_commit_url": null,
-      "ci_status": "backend green, frontend green, e2e Playwright in_progress",
+      "docs_commit": "3d75879",
+      "docs_commit_url": "https://github.com/yowanda/Reckora/commit/3d75879",
+      "ci_status": "green (backend + frontend + e2e Playwright)",
       "tests_added": 15,
       "summary": "RedisHostRateLimiter (sliding-window via per-second buckets in a Redis hash, atomic Lua INCR+EXPIRE+check round-trip), fail-open dispatch in HostRateLimiter, 2 admin/env knobs (host_rate_limit_use_redis + host_rate_limit_redis_url; reuse celery_broker_url fallback), /api/health.host_rate_limit.backend = 'memory' | 'redis', NOSCRIPT recovery, redis:7-alpine service container in CI",
       "key_files": [
@@ -58,8 +58,8 @@
     "9h": {"title": "HF Space keep-warm cron", "residual_risk_closed": ["M7"], "status": "pending"}
   },
   "active_batch": {
-    "phase": "9b",
-    "next_action": "Wait for e2e CI green on b6073af, then commit docs(9b) updating ROADMAP.md (mark 9b [x] + bump Repo HEAD SHA + test baseline 473), then continue to 9c.",
+    "phase": "9c",
+    "next_action": "Implement Phase 9c geo-aware proxy selection: GeoIP2 lookup of proxy egress IPs + per-site geo affinity (e.g. site_overrides.<name>.preferredRegion = 'us|eu|jp'), 'closest' / 'cheapest' / 'random' selection mode, /api/health.proxy_pool.geo_distribution surface, ~12 backend tests. Use feat -> CI -> docs -> report pattern. Closes residual-risk M2.",
     "blocking": false
   },
   "rules": {
