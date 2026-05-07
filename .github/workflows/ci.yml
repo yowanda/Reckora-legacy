@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv venv
-          uv pip install -e ".[dev,scale]"
+          uv pip install -e ".[dev,scale,gql]"
       - name: Lint
         run: uv run ruff check .
       - name: Format check

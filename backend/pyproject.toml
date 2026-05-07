@@ -60,6 +60,12 @@ pdf = ["weasyprint>=62.0"]
 # does not require a separate broker. Pinning ``celery>=5.4`` for the
 # improved type hints + ``redis>=5.0`` for the async client.
 scale = ["celery>=5.4.0", "redis>=5.0.0"]
+# Phase 8c: GraphQL gateway alongside the REST/SSE surface. Opt-in via
+# the ``enable_graphql_gateway`` admin knob; without it the route at
+# ``/api/graphql`` returns 503 so the public API surface is unchanged.
+# Strawberry's FastAPI integration owns the schema-to-router wiring;
+# pinning ``>=0.235`` for stable async resolver support.
+gql = ["strawberry-graphql[fastapi]>=0.235.0"]
 
 [build-system]
 requires = ["hatchling"]

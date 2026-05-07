@@ -287,5 +287,19 @@ class Settings(BaseSettings):
     # proxy gets one full bucket cycle to recover.
     proxy_health_cooldown_sec: int = 60
 
+    # Phase 8c: GraphQL gateway as an alternate transport.
+    #
+    # When ``enable_graphql_gateway`` is 1 the route at
+    # ``/api/graphql`` exposes a Strawberry-served schema that mirrors
+    # the REST surface — health, sites, current member, scan history,
+    # the search mutation (collected from the SSE stream into a single
+    # response), permute strategies, and admin settings reads. Default
+    # 0 because the REST surface is the supported transport for the
+    # bundled SPA and exposing a second one increases the attack
+    # surface; operators who want to drive Reckora from a third-party
+    # dashboard (Hasura / Apollo / their own client) flip the knob via
+    # PATCH /api/admin/settings without redeploying.
+    enable_graphql_gateway: int = 0
+
 
 settings = Settings()

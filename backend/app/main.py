@@ -109,6 +109,30 @@ async def _startup() -> None:
     auth_mod._ensure_session_secret()
 
 
+# Phase 8c: mount the GraphQL gateway alongside REST. Always-on mount
+# keeps the schema reachable for tooling (introspection); each
+# resolver gates on ``enable_graphql_gateway`` so the runtime knob
+# decides whether queries actually run. The import is wrapped so the
+# default deployment, which doesn't ship the [gql] extra, still
+# starts up cleanly — `/api/graphql` returns 503 in that case.
+try:
+    from . import graphql_api as _graphql_api_mod
+
+    app.include_router(_graphql_api_mod.build_router(), prefix="/api/graphql")
+except ImportError:  # pragma: no cover - exercised only when [gql] is absent
+
+    @app.api_route("/api/graphql", methods=["GET", "POST"])
+    async def _graphql_unavailable() -> ORJSONResponse:
+        return ORJSONResponse(
+            status_code=503,
+            content={
+                "detail": (
+                    "GraphQL gateway not installed; reinstall the backend with the [gql] extra"
+                )
+            },
+        )
+
+
 @app.exception_handler(RateLimitExceeded)
 async def _rate_limit_handler(_: Request, exc: RateLimitExceeded) -> ORJSONResponse:
     return ORJSONResponse(
@@ -365,7 +389,7 @@ async def health() -> dict[str, Any]:
     from . import host_rate_limit as host_rate_limit_mod
     from . import proxy_pool as proxy_pool_mod
 
-    return {
+    payload: dict[str, Any] = {
         "status": "ok",
         "version": __version__,
         "sites": len(get_catalog().sites),
@@ -379,6 +403,20 @@ async def health() -> dict[str, Any]:
         "proxy_pool": proxy_pool_mod.status(),
         "host_rate_limit": host_rate_limit_mod.status(),
     }
+    # Phase 8c: surface gateway availability so a dashboard can spot
+    # the alternate transport without trying a query. The `available`
+    # bit is False when either the [gql] extra is not installed *or*
+    # the admin knob is off.
+    try:
+        from . import graphql_api as graphql_api_mod
+
+        payload["graphql"] = {
+            "available": graphql_api_mod.is_available(),
+            "installed": True,
+        }
+    except ImportError:
+        payload["graphql"] = {"available": False, "installed": False}
+    return payload
 
 
 @app.get("/api/sites")

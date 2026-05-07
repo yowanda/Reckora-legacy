@@ -333,6 +333,22 @@ KNOBS: tuple[KnobSpec, ...] = (
             "the API process's IP."
         ),
     ),
+    KnobSpec(
+        key="enable_graphql_gateway",
+        settings_attr="enable_graphql_gateway",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 8c: when 1, ``/api/graphql`` exposes a "
+            "Strawberry-served schema that mirrors the REST surface "
+            "(health, sites, current member, scan history, search "
+            "mutation, permute strategies, admin settings reads). "
+            "When 0, the route returns 503 so casual operators "
+            "don't see a second transport unless they ask for it. "
+            "Auth piggybacks on the same session cookie / Bearer "
+            "token used by REST."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}
