@@ -1,0 +1,61 @@
+name: hf-keep-warm
+
+# Phase 9h — HF Space free-tier keep-warm cron.
+#
+# Closes residual risk M7 (cold-start latency on the HF Space free
+# tier: the container hibernates after ~5 min of inactivity, so the
+# next visitor pays the 30-45 s Docker boot before the FastAPI worker
+# accepts a TCP connection). This job pings
+# ``https://yesmyyt-cacadoxx.hf.space/api/health`` every 30 minutes so
+# the container stays warm without paying for HF Spaces' "Always On"
+# tier — which is the documented alternative if budget allows.
+#
+# The job exits non-zero if all retries fail, so a sustained outage
+# surfaces as a red badge on the workflow page; transient failures
+# (a single boot-window 503) get absorbed by the retry budget inside
+# the script.
+#
+# A ``workflow_dispatch`` trigger is also wired so a maintainer can
+# fire an ad-hoc smoke run from the GitHub UI without waiting for the
+# next 30-minute boundary — handy for verifying the live demo is up
+# after a deploy.
+
+on:
+  schedule:
+    # Every 30 minutes — matches the HF Space free-tier hibernation
+    # window of roughly 5-15 minutes of inactivity. A 30-minute cadence
+    # keeps the container warm with comfortable margin while staying
+    # well under the GitHub Actions free-tier monthly minute budget
+    # (48 runs/day x ~10 s = ~8 min/day, ~240 min/month).
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Override health endpoint (leave empty to use default)."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check out Reckora
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Ping HF Space /api/health
+        run: |
+          set -eu
+          URL_ARG=""
+          if [ -n "${{ inputs.url }}" ]; then
+            URL_ARG="--url ${{ inputs.url }}"
+          fi
+          python3 backend/scripts/hf_space_keep_warm.py ${URL_ARG}
