@@ -255,6 +255,65 @@ def test_admin_patch_rejects_unknown_extra_field(
     assert r.status_code == 422  # pydantic strict (extra=forbid)
 
 
+def test_admin_patch_model_exposes_every_registered_knob(
+    client: TestClient,
+    admin_token: str,
+) -> None:
+    """The PATCH body model must mirror ``admin_settings.KNOBS`` so a knob
+    added to the registry is auto-flippable. Catches the regression where
+    Phase 7-9 knobs landed in ``KNOBS`` but the request schema still only
+    enumerated the original Phase 5d fields, silently 422-ing every
+    PATCH against a newer knob."""
+    from app.main import AdminSettingsPatch
+
+    declared = set(AdminSettingsPatch.model_fields) - {"reset"}
+    assert declared == set(admin_settings_mod.ALLOWED_KEYS), (
+        "AdminSettingsPatch fields must match admin_settings.KNOBS exactly"
+    )
+
+
+@pytest.mark.parametrize("knob", sorted(admin_settings_mod.ALLOWED_KEYS))
+def test_admin_patch_accepts_every_registered_knob_in_range(
+    client: TestClient,
+    admin_token: str,
+    knob: str,
+) -> None:
+    """Round-trip every knob through PATCH at its current default value
+    so a future addition to ``KNOBS`` that is NOT mirrored on the model
+    fails this parametrized check loudly instead of just silently
+    blocking PATCH on the live deployment."""
+    spec = admin_settings_mod.KNOBS_BY_KEY[knob]
+    # Pick a value safely inside the valid range — the current effective
+    # value (== Settings default when no override is set) is always
+    # in-range by construction.
+    target = admin_settings_mod.effective_int(knob)
+    r = client.patch(
+        "/api/admin/settings",
+        headers=_hdr(admin_token),
+        json={knob: target},
+    )
+    assert r.status_code == 200, f"PATCH {knob}={target} -> {r.status_code} {r.text}"
+    knobs = {k["key"]: k for k in r.json()["knobs"]}
+    assert knobs[knob]["effective"] == target
+    # Also exercise the reset path so we leave no override behind for
+    # the next test in the parametrized run.
+    r = client.patch(
+        "/api/admin/settings",
+        headers=_hdr(admin_token),
+        json={"reset": [knob]},
+    )
+    assert r.status_code == 200
+    assert r.json()["knobs"][0]["key"] in admin_settings_mod.ALLOWED_KEYS
+    # Range rejected: max+1 must always be out-of-range.
+    r = client.patch(
+        "/api/admin/settings",
+        headers=_hdr(admin_token),
+        json={knob: spec.maximum + 1},
+    )
+    assert r.status_code == 400
+    assert "outside allowed range" in r.json()["detail"]
+
+
 def test_admin_patch_forbidden_for_member(
     client: TestClient,
     member_token: str,
