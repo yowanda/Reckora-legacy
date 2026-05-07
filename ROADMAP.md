@@ -11,12 +11,12 @@ HF Space at <https://yesmyyt-cacadoxx.hf.space> reflects the change.
 
 | Field | Value |
 | --- | --- |
-| Repo HEAD on main | `f4d1ab0` (Phase 7b — WHOIS / HIBP enrichment) |
-| HF Space HEAD | `784ac59` (mirrors main through Phase 5h-FE; Phase 6 / 7a / 7b / 7c not yet redeployed) |
-| Active batch | **Phase 7d — ML reranker retrain pipeline + drift detector** |
-| Last batch shipped | Phase 7c — reverse-image lookup hook (Yandex / Google Lens / TinEye URL builder + 21 tests + Playwright e2e) |
-| Last update | 2026-05-07 (Phase 7c — reverse-image lookup) |
-| Test baseline | backend pytest **325 / 325** · mypy 21 src files · ruff clean · frontend lint+build green · e2e **7 / 7** |
+| Repo HEAD on main | `886d448` (Phase 7c — reverse-image lookup hook) → bumped on next push to Phase 7d |
+| HF Space HEAD | `784ac59` (mirrors main through Phase 5h-FE; Phase 6 / 7a / 7b / 7c / 7d not yet redeployed) |
+| Active batch | _none — Phase 7 closed; next batch TBD_ |
+| Last batch shipped | Phase 7d — ML reranker retrain pipeline + drift detector (`app/ml_drift.py` Kolmogorov-Smirnov + `app/ml_retrain.py` sync trainer + `/api/admin/ml/{status,retrain}` + AdminPanel `MlTab` + 31 new tests + Playwright e2e) |
+| Last update | 2026-05-07 (Phase 7d — ML reranker retrain pipeline) |
+| Test baseline | backend pytest **356 / 356** · mypy 23 src files · ruff clean · frontend lint+build green · e2e **8 / 8** |
 
 The `Active batch` line is updated at the start of every batch. The `Repo
 HEAD on main` and `Last update` lines are updated at the end of every batch
@@ -56,7 +56,7 @@ once `command git push origin main` returns and CI is green.
 - [x] **6c** — head-to-head benchmark vs `soxoj/maigret` CLI (`docs/benchmark-phase-6.md`)
 - [x] **6d** — PDF export via weasyprint (optional `[pdf]` extra; graceful HTML fallback) + 6 tests
 
-### Phase 7 — intel & enrichment beyond maigret  *(in flight)*
+### Phase 7 — intel & enrichment beyond maigret  *(complete)*
 
 > **Goal:** capabilities `soxoj/maigret` does not have. Each sub-phase opens a new
 > dimension of OSINT signal.
@@ -64,7 +64,7 @@ once `command git push origin main` returns and CI is green.
 - [x] **7a** — profile-image perceptual-hash (pHash) graph stitching (8x8 dHash via `app/imagephash.py`; admin knobs `enable_image_phash` + `image_phash_max_distance`; SPA renders dashed purple `phash_edge` between matching CLAIMED hits + `pHash matches` SidePanel stat; 24 new tests covering pure hash math, mocked HTTP fetch, SSE emission, and a Playwright e2e)
 - [x] **7b** — WHOIS / HIBP-style breach enrichment for `identity_type=email` (`app/enrichment.py` runs RDAP + HIBP lookups in parallel; admin knobs `enable_email_enrichment` + `enrichment_rate_per_min`; HIBP key in env-only `enrichment_hibp_api_key`; SPA mounts `EmailEnrichmentPanel` after every list-mode email scan; 33 new tests covering parsers, rate limiter, mocked HTTP fetchers, endpoint auth/gating/rate-limit, and a Playwright e2e)
 - [x] **7c** — reverse-image lookup hook (Yandex / Google Lens / TinEye) (`app/reverseimage.py` builds public reverse-search landing-page URLs; admin knob `enable_reverse_image` + 3 template settings; SPA `ReverseImageChips` renders a chip row under any CLAIMED hit whose extractor pass produced an `avatar_url`; no API key, no upstream HTTP call from the backend; 21 new tests + a Playwright e2e)
-- [ ] **7d** — ML reranker retrain pipeline + drift detector
+- [x] **7d** — ML reranker retrain pipeline + drift detector (`app/ml_drift.py` pure-Python two-sample Kolmogorov-Smirnov + `FeatureSummary`/`FeatureDrift`/`DriftReport` dataclasses; `app/ml_retrain.py` synchronous trainer that subprocess-runs `scripts/train_ml.py`, persists `RetrainStatus` to `app/ml/retrain_status.json` so it survives worker restarts; admin knobs `ml_drift_ks_threshold_pct` + `ml_drift_window_size`; ML scoring fan-outs into a bounded ring buffer used as the drift "current" sample; new admin endpoints `GET /api/admin/ml/status` + `POST /api/admin/ml/retrain`; SPA AdminPanel grows an `ML` tab with model age, last-retrain row, "Retrain now" button, drift summary chip and per-feature KS table; 31 new backend tests + a Playwright e2e)
 
 ### Phase 8 — scale & infra  *(planned)*
 
@@ -399,15 +399,70 @@ These are non-negotiable guards I run on **every** batch before pushing to `main
   click-to-open chip row that lands on Yandex / Google Lens /
   TinEye with the image URL pre-filled.
 
-### 7d — ML reranker retrain pipeline + drift detector
+### 7d — ML reranker retrain pipeline + drift detector  *(shipped)*
 
-- `backend/scripts/train_ml.py` already exists; Phase 7d wires it into a
-  monthly admin-triggered retrain that pulls features from `scans` history.
-- New `backend/app/ml_drift.py` computes a calibration KS-stat between the
-  reranker's score distribution at deploy time vs current production traffic;
-  surfaces a warning in the admin panel when drift is statistically significant.
-- Acceptance: admin panel shows "model age", "last retrain", "drift status"
-  per knob.
+- `backend/scripts/train_ml.py` was refactored to expose a
+  `build_training_rows()` helper so the runtime drift detector can
+  reproduce the synthetic training distribution without pulling NumPy
+  / sklearn into the request loop.
+- `backend/app/ml_retrain.py` wraps the trainer in a synchronous
+  `run_retrain(triggered_by=...)` entry point, writes a
+  `RetrainStatus` blob (started_at, finished_at, duration_s, log,
+  error, triggered_by, extras) to `app/ml/retrain_status.json` so
+  the most recent run survives worker restarts, and exposes
+  `model_age_days()` from the `model.onnx` mtime.
+- `backend/app/ml_drift.py` is a pure-Python two-sample
+  Kolmogorov-Smirnov drift detector: `summarise()` projects a list
+  of floats into a `FeatureSummary` (count / mean / std / min / p50
+  / p90 / max), `ks_two_sample()` computes the KS statistic plus an
+  asymptotic p-value (Stephens 1970 correction) without `scipy`,
+  and `compute_drift()` aggregates per-feature verdicts into a
+  `DriftReport` whose `any_alarm` flag and `alarm_features` tuple
+  drive the admin-panel UI. Features with fewer than
+  `MIN_SAMPLE_SIZE` observations are silently skipped.
+- `backend/app/ml.py` records every production feature vector that
+  goes through `score()` into a bounded ring buffer
+  (`record_features_for_drift` + `recent_feature_distribution`) so
+  the drift detector has a "current" sample without needing a
+  separate logging pipeline.
+- Two new admin-only handlers in `backend/app/main.py`:
+  - `GET /api/admin/ml/status` returns `{model_age_days,
+    last_retrain, drift}`. The drift threshold is pulled from the
+    new `ml_drift_ks_threshold_pct` admin knob (1-100, divided by
+    100 at runtime), and the buffer cap is the `ml_drift_window_size`
+    admin knob (64-65536).
+  - `POST /api/admin/ml/retrain` runs `run_retrain` synchronously
+    and returns the fresh status; the SPA refreshes
+    `/api/admin/ml/status` after the call returns.
+- SPA grows a new `ML` tab in `AdminPanel`. `MlTab.tsx` shows the
+  model age, the last-retrain row (timestamp, duration, ok / error,
+  triggered-by), a "Retrain now" button, the drift summary chip
+  (`alarm` / `ok`) plus a per-feature KS table with reference and
+  current row counts, and a collapsible last-retrain log block.
+- Tests:
+  - `backend/tests/test_ml_drift.py` (16 cases) covers `summarise`,
+    `ks_two_sample` (identical, disjoint, partial-overlap,
+    shifted-mean), and `compute_drift` (skipping, threshold gating,
+    `to_dict` shape).
+  - `backend/tests/test_ml_retrain.py` (9 cases) covers
+    `run_retrain` happy path, failure path, exception capture, log
+    truncation; `last_status` round-trips and graceful degradation
+    on corrupt / non-dict JSON; `model_age_days` returning `None`
+    when the model is missing.
+  - `backend/tests/test_ml_admin_endpoints.py` (6 cases) covers
+    auth gating on both endpoints, the threshold knob driving the
+    drift envelope, the retrain endpoint persisting status (with a
+    monkeypatched trainer), and failure surfacing.
+  - `frontend/e2e/ml-admin-tab.spec.ts` Playwright e2e logs in as
+    admin, navigates to the ML tab, asserts the drift table
+    renders the alarmed and ok rows correctly, clicks "Retrain
+    now", and verifies the status row + log block update on
+    refresh.
+- Acceptance: admin panel shows "model age", "last retrain", "drift
+  status" per acceptance criteria; retrain status persists across
+  restarts; drift alarm fires when the production distribution
+  diverges from the synthetic training set above the admin-tunable
+  threshold.
 
 ---
 
@@ -482,6 +537,7 @@ or scale, so they're parked until a downstream user explicitly asks for them.
 | Image stitching (pHash) | none | cross-link wajah lintas situs (Phase 7a) |
 | Email/phone enrichment | none | WHOIS + HIBP-style breach data (Phase 7b) |
 | Reverse-image lookup | none | one-click Yandex/Google Lens hook (Phase 7c) |
+| ML reranker retrain | none | one-click admin retrain + KS-stat drift detector (Phase 7d) |
 | Permutation strategies | basic | 4-strategy pipeline (separator + suffix + prefix + leetspeak) |
 | History + diff | stateless | SQLite history + per-username diff |
 | Auth & RBAC | none | members-only + admin role + bcrypt + bearer/cookie |

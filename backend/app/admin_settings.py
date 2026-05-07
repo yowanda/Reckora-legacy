@@ -245,6 +245,35 @@ KNOBS: tuple[KnobSpec, ...] = (
             "directly. Default on because there's no quota cost."
         ),
     ),
+    KnobSpec(
+        key="ml_drift_ks_threshold_pct",
+        settings_attr="ml_drift_ks_threshold_pct",
+        minimum=1,
+        maximum=100,
+        description=(
+            "Phase 7d: threshold (in percent, 1-100) on the "
+            "two-sample Kolmogorov-Smirnov statistic above which a "
+            "feature is flagged as drifted in the admin ML "
+            "panel. The runtime divides by 100 before applying "
+            "the gate. 10 (== 0.10) is reasonable for the "
+            "default synthetic training set; noisier production "
+            "streams should crank the threshold up to avoid "
+            "false alarms."
+        ),
+    ),
+    KnobSpec(
+        key="ml_drift_window_size",
+        settings_attr="ml_drift_window_size",
+        minimum=64,
+        maximum=65536,
+        description=(
+            "Phase 7d: maximum number of feature vectors kept in "
+            "the in-memory ring buffer the drift detector samples "
+            "from. Older observations are evicted when this cap "
+            "is exceeded. 2048 covers ~10 scans of a 200-site "
+            "catalog without leaking memory."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

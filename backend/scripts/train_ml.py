@@ -95,7 +95,14 @@ def _make_features(
     return feats
 
 
-def build_dataset() -> tuple[np.ndarray, np.ndarray]:
+def _build_rows_and_labels() -> tuple[list[list[float]], list[int]]:
+    """Synthesize the (features, label) corpus from ``sites.json``.
+
+    Phase 7d: factored out of :func:`build_dataset` so the runtime
+    drift detector can reproduce the training distribution without
+    pulling NumPy / scikit-learn / skl2onnx into the request loop.
+    """
+
     payload = json.loads(SITES_PATH.read_text(encoding="utf-8"))
     raw_sites = payload.get("sites") or payload
 
@@ -282,6 +289,22 @@ def build_dataset() -> tuple[np.ndarray, np.ndarray]:
                 "unknown",
             )
 
+    return rows, labels
+
+
+def build_training_rows() -> list[list[float]]:
+    """Phase 7d helper — return just the feature rows, no labels.
+
+    Used by ``app.ml.training_feature_distribution`` to compute the
+    KS reference distribution. Cheap to call (no NumPy involvement).
+    """
+
+    rows, _labels = _build_rows_and_labels()
+    return rows
+
+
+def build_dataset() -> tuple[np.ndarray, np.ndarray]:
+    rows, labels = _build_rows_and_labels()
     X = np.array(rows, dtype=np.float32)
     y = np.array(labels, dtype=np.int64)
     return X, y

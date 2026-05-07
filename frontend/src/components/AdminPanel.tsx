@@ -3,10 +3,11 @@ import { createMember, deleteMember, listMembers, patchMember } from '../api'
 import { useAuth } from '../auth-context'
 import { ApiError, type Member, type Role } from '../types'
 import { HistoryView } from './HistoryView'
+import { MlTab } from './MlTab'
 import { SettingsTab } from './SettingsTab'
 import { SitesEditor } from './SitesEditor'
 
-type AdminTab = 'members' | 'sites' | 'history' | 'settings'
+type AdminTab = 'members' | 'sites' | 'history' | 'settings' | 'ml'
 
 export function AdminPanel() {
   const [tab, setTab] = useState<AdminTab>('members')
@@ -33,12 +34,16 @@ export function AdminPanel() {
         <TabButton active={tab === 'settings'} onClick={() => setTab('settings')}>
           Settings
         </TabButton>
+        <TabButton active={tab === 'ml'} onClick={() => setTab('ml')}>
+          ML
+        </TabButton>
       </nav>
 
       {tab === 'members' && <MembersTab />}
       {tab === 'sites' && <SitesEditor />}
       {tab === 'history' && <HistoryView />}
       {tab === 'settings' && <SettingsTab />}
+      {tab === 'ml' && <MlTab />}
     </section>
   )
 }

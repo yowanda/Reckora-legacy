@@ -247,6 +247,103 @@ def is_model_available() -> bool:
     return _HANDLE.is_available()
 
 
+# ---------------------------------------------------------------------------
+# Phase 7d — feature distribution recording for the drift detector.
+#
+# The runtime keeps a small ring-buffer of the most recent feature
+# vectors observed in production. ``app.ml_drift`` then compares this
+# distribution against the synthetic training set the model was fit
+# on. The buffer is bounded so a long-lived worker doesn't slowly leak
+# memory; the bound is admin-tunable through
+# ``ml_drift_window_size`` but defaults to a sensible value.
+# ---------------------------------------------------------------------------
+
+_RECENT_LOCK = threading.Lock()
+_RECENT_FEATURES: list[list[float]] = []
+_RECENT_BUFFER_BOUND = 2048
+
+
+def _recent_buffer_bound() -> int:
+    # Hot-tunable through admin settings; falls back to the module-level
+    # default when the admin DB is unavailable (test contexts).
+    try:
+        from . import admin_settings as admin_settings_mod
+
+        cap = admin_settings_mod.effective_int("ml_drift_window_size")
+        return max(64, min(cap, 65536))
+    except Exception:
+        return _RECENT_BUFFER_BOUND
+
+
+def record_features_for_drift(features: FeatureVector) -> None:
+    """Append a feature vector to the ring buffer used by the drift
+    detector. Cheap (single list mutation under a small lock) and
+    idempotent across restarts because the buffer is in-memory only."""
+
+    bound = _recent_buffer_bound()
+    with _RECENT_LOCK:
+        _RECENT_FEATURES.append(features.to_list())
+        # Evict from the front until we're back under the bound.
+        excess = len(_RECENT_FEATURES) - bound
+        if excess > 0:
+            del _RECENT_FEATURES[:excess]
+
+
+def reset_recent_features_for_tests() -> None:
+    with _RECENT_LOCK:
+        _RECENT_FEATURES.clear()
+
+
+def recent_feature_distribution() -> dict[str, list[float]]:
+    """Return ``{feature_name: list[float]}`` for the in-memory buffer.
+
+    Empty when no inference has happened yet.
+    """
+
+    with _RECENT_LOCK:
+        snapshot = [row[:] for row in _RECENT_FEATURES]
+    out: dict[str, list[float]] = {name: [] for name in FEATURE_NAMES}
+    for row in snapshot:
+        if len(row) != len(FEATURE_NAMES):
+            continue
+        for name, value in zip(FEATURE_NAMES, row, strict=False):
+            out[name].append(float(value))
+    return out
+
+
+def training_feature_distribution() -> dict[str, list[float]]:
+    """Reproduce the synthetic training-set distribution.
+
+    Re-imports ``scripts.train_ml`` lazily so we don't pull skl2onnx
+    into runtime startup. Returns the same dict shape as
+    :func:`recent_feature_distribution` so the drift detector can
+    compare them directly.
+    """
+
+    try:
+        # ``scripts`` lives outside the package; resolve relative to the
+        # module file the same way ml_retrain does.
+        import importlib.util
+
+        backend_root = Path(__file__).resolve().parent.parent
+        spec = importlib.util.spec_from_file_location(
+            "_train_ml", backend_root / "scripts" / "train_ml.py"
+        )
+        if spec is None or spec.loader is None:
+            return {name: [] for name in FEATURE_NAMES}
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        rows = mod.build_training_rows()
+    except Exception as exc:  # pragma: no cover - guarded by retrain tests
+        log.warning("phase-7d: unable to reproduce training set: %s", exc)
+        return {name: [] for name in FEATURE_NAMES}
+    out: dict[str, list[float]] = {name: [] for name in FEATURE_NAMES}
+    for row in rows:
+        for name, value in zip(FEATURE_NAMES, row, strict=False):
+            out[name].append(float(value))
+    return out
+
+
 def score(
     site: Site,
     *,
@@ -272,6 +369,11 @@ def score(
         body=body,
         elapsed_ms=elapsed_ms,
     )
+    # Phase 7d: fan out into the drift-detector ring buffer. We do this
+    # before the ORT call so a future ORT failure doesn't drop the
+    # observation — drift visibility is more important than the score
+    # itself for the admin-panel use case.
+    record_features_for_drift(features)
     proba = handle.claimed_probability(features)
     if proba is None:
         return None

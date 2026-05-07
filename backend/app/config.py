@@ -184,6 +184,20 @@ class Settings(BaseSettings):
     # wait is one ``enrichment_timeout`` and not the sum.
     enrichment_timeout: float = 5.0
 
+    # Phase 7d: ML reranker drift detector.
+    #
+    # ``ml_drift_ks_threshold_pct`` is interpreted as a percentage
+    # (0-100) so it fits the existing integer-only admin-knob
+    # surface; the runtime divides by 100 before passing it to the
+    # KS-statistic gate. 10 (== 0.10) is a reasonable starting
+    # threshold for the synthetic training set's row count;
+    # operators with a noisier production stream should crank it up.
+    ml_drift_ks_threshold_pct: int = 10
+    # Maximum number of feature vectors kept in the in-memory ring
+    # buffer the drift detector samples from. 2048 covers ~10 scans
+    # of a 200-site catalog without leaking memory.
+    ml_drift_window_size: int = 2048
+
     # Phase 7c: reverse-image lookup hooks.
     #
     # When ``enable_reverse_image`` is 1, every CLAIMED hit whose

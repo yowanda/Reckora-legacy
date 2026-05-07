@@ -627,3 +627,65 @@ export async function reverseImageLookup(
     body: JSON.stringify({ image_url: imageUrl }),
   })
 }
+
+// ---------------------------------------------------------------------------
+// Phase 7d: ML reranker retrain pipeline + drift detector.
+// Two admin-only endpoints; both return JSON envelopes the AdminPanel
+// renders directly. The retrain handler is synchronous on the server
+// (~1s on the synthetic training set), so we just block on the
+// fetch and refresh the status panel from its response.
+// ---------------------------------------------------------------------------
+
+export interface MlFeatureSummary {
+  count: number
+  mean: number
+  std: number
+  min: number
+  p50: number
+  p90: number
+  max: number
+}
+
+export interface MlFeatureDrift {
+  feature: string
+  ks_statistic: number
+  p_value: number
+  alarm: boolean
+  skipped: boolean
+  reference: MlFeatureSummary | null
+  current: MlFeatureSummary | null
+}
+
+export interface MlDriftReport {
+  threshold: number
+  any_alarm: boolean
+  alarm_features: string[]
+  features: MlFeatureDrift[]
+}
+
+export interface MlRetrainStatus {
+  ok: boolean
+  started_at: number
+  finished_at: number
+  duration_s: number
+  log: string
+  error: string | null
+  triggered_by: string
+  extras: Record<string, unknown>
+}
+
+export interface MlStatusResponse {
+  model_age_days: number | null
+  last_retrain: MlRetrainStatus | null
+  drift: MlDriftReport
+}
+
+export async function fetchMlStatus(): Promise<MlStatusResponse> {
+  return jsonFetch<MlStatusResponse>('/api/admin/ml/status')
+}
+
+export async function triggerMlRetrain(): Promise<{ status: MlRetrainStatus }> {
+  return jsonFetch<{ status: MlRetrainStatus }>('/api/admin/ml/retrain', {
+    method: 'POST',
+  })
+}

@@ -1146,6 +1146,55 @@ async def admin_patch_settings(
 
 
 # ---------------------------------------------------------------------------
+# Phase 7d: ML reranker retrain pipeline + drift detector.
+#
+# Two admin-only endpoints:
+#
+# * ``GET  /api/admin/ml/status`` returns model age + the most recent
+#   retrain status + a drift report comparing the historical training
+#   set's feature distribution to the current production distribution
+#   recorded by ``app.ml.RECENT_FEATURES`` (a small ring-buffer
+#   maintained by the runtime scorer).
+# * ``POST /api/admin/ml/retrain`` synchronously kicks off the
+#   retrain pipeline (subprocesses ``scripts/train_ml.py``) and
+#   returns the fresh status. We don't expose a background-job API
+#   yet because the training run finishes in <2s on the synthetic set.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/admin/ml/status")
+async def admin_ml_status(
+    _: Member = Depends(current_admin),
+) -> dict[str, Any]:
+    """Model age, last retrain, current drift report."""
+    from . import ml as ml_mod
+    from . import ml_drift as drift_mod
+    from . import ml_retrain as retrain_mod
+
+    last = retrain_mod.last_status()
+    reference = ml_mod.training_feature_distribution()
+    current = ml_mod.recent_feature_distribution()
+    threshold = float(_admin_int("ml_drift_ks_threshold_pct") or 10) / 100.0
+    report = drift_mod.compute_drift(reference, current, threshold=threshold)
+    return {
+        "model_age_days": retrain_mod.model_age_days(),
+        "last_retrain": last.to_dict() if last else None,
+        "drift": report.to_dict(),
+    }
+
+
+@app.post("/api/admin/ml/retrain")
+async def admin_ml_retrain(
+    admin: Member = Depends(current_admin),
+) -> dict[str, Any]:
+    """Run the retrain pipeline synchronously and return the new status."""
+    from . import ml_retrain as retrain_mod
+
+    status = retrain_mod.run_retrain(triggered_by=admin.username)
+    return {"status": status.to_dict()}
+
+
+# ---------------------------------------------------------------------------
 # Phase 7b: WHOIS / HIBP-style enrichment for ``identity_type=email``.
 #
 # Default-off, opt-in via ``enable_email_enrichment``. The handler is
