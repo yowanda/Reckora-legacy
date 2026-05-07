@@ -465,6 +465,24 @@ KNOBS: tuple[KnobSpec, ...] = (
             "scan tail-latency bounded."
         ),
     ),
+    KnobSpec(
+        key="host_rate_limit_use_redis",
+        settings_attr="host_rate_limit_use_redis",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 9b: when 1, the per-host token bucket is replaced "
+            "by a Redis-backed sliding-window counter so a Celery "
+            "fan-out (Phase 8a) keeps a single bucket per host across "
+            "all workers. The connection string comes from "
+            "``RECKORA_HOST_RATE_LIMIT_REDIS_URL``; if blank the "
+            "Phase 8a ``RECKORA_CELERY_BROKER_URL`` is reused. A Redis "
+            "transport error falls *open* to the in-memory bucket so "
+            "an outage stays fail-open rather than fail-closed. Off "
+            "by default — the in-memory bucket is the right choice "
+            "for HF Space's single-container deployment."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

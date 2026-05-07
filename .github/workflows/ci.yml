@@ -11,6 +11,24 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      # Phase 9b: live Redis instance for the distributed
+      # host-rate-limit integration tests in
+      # ``tests/test_host_rate_limit_redis.py``. The tests are
+      # gated on ``RECKORA_TEST_REDIS_URL`` so the without-redis
+      # path still skips cleanly on a forked run that doesn't get
+      # a service container.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      RECKORA_TEST_REDIS_URL: redis://127.0.0.1:6379/0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -1,4 +1,4 @@
-"""Phase 8b: per-host token-bucket rate limiter.
+"""Phase 8b + Phase 9b: per-host rate limiter.
 
 Pairs with :mod:`app.proxy_pool` to make a Reckora scan that fans out
 to thousands of sites a *good citizen* on the public internet — even
@@ -12,11 +12,12 @@ when the operator has the proxy rotator turned off. The two pillars:
 
 Design choices
 --------------
-* **Token bucket**, not sliding window. A bucket lets a quiet host
-  absorb a 60-request burst at the start of a scan if it had been
-  idle for a minute, which is exactly what we want — it preserves
-  scan throughput while still enforcing a steady-state rate. A
-  sliding window would drag every burst out to the slow steady rate.
+* **Token bucket** (Phase 8b in-memory backend), not sliding window.
+  A bucket lets a quiet host absorb a 60-request burst at the start
+  of a scan if it had been idle for a minute, which is exactly what
+  we want — it preserves scan throughput while still enforcing a
+  steady-state rate. A sliding window would drag every burst out to
+  the slow steady rate.
 
 * **Capacity == refill rate**. We pick the simplest defensible
   capacity: one full minute of traffic. Operators tune the rate
@@ -33,6 +34,14 @@ Design choices
   ``acquire`` coroutine is a no-op. The check is a single int read
   through the admin-settings cache so the gate cost is negligible
   even on a hot per-site code path.
+
+* **Redis backend** (Phase 9b — opt-in). When
+  ``host_rate_limit_use_redis=1`` the module dispatches to
+  :mod:`app.host_rate_limit_redis`, a sliding-window counter that
+  uses one atomic Lua script for the ``INCR + EXPIRE + check``
+  round-trip so N Celery workers (Phase 8a) share *one* bucket per
+  host. A Redis transport error falls *open* to the in-memory
+  bucket so an outage stays fail-open rather than fail-closed.
 """
 
 from __future__ import annotations
@@ -41,8 +50,12 @@ import asyncio
 import threading
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from .config import settings
+
+if TYPE_CHECKING:
+    from .host_rate_limit_redis import RedisHostRateLimiter
 
 
 @dataclass(slots=True)
@@ -93,11 +106,18 @@ class HostRateLimiter:
     # ------------------------------------------------------------------
 
     async def acquire(self, host: str) -> None:
-        """Block until one token is available for ``host``.
+        """Block until one slot is available for ``host``.
 
         Hosts are normalised to lowercase so ``Reddit.com`` and
         ``reddit.com`` share a bucket. An empty / falsy host (e.g. a
         ``file://`` URL passed in by accident) is treated as a no-op.
+
+        When ``host_rate_limit_use_redis=1`` (Phase 9b), the request
+        is dispatched to the Redis-backed sliding-window limiter so
+        N Celery workers share a single bucket per host. A Redis
+        transport error falls *open* to the in-memory token bucket
+        below — being briefly too-fast on rate is much better than
+        fail-closing every probe during a Redis outage.
         """
         if not host:
             return
@@ -105,6 +125,17 @@ class HostRateLimiter:
         # Fast-path: if the limiter is globally disabled, do nothing.
         if self._explicit_rate is None and not _is_enabled():
             return
+
+        # Phase 9b: Redis-backed sliding window (opt-in).
+        if self._explicit_rate is None and _is_redis_backend_enabled():
+            try:
+                redis_limiter = _get_redis_limiter()
+                await redis_limiter.acquire(normalised)
+                return
+            except Exception:
+                # Fall open to the in-memory bucket below.
+                pass
+
         rate = self._current_rate_per_sec()
         capacity = self._current_capacity()
         while True:
@@ -231,9 +262,71 @@ def is_enabled() -> bool:
     return _is_enabled()
 
 
+# ---------------------------------------------------------------------------
+# Phase 9b: Redis backend dispatch.
+# ---------------------------------------------------------------------------
+
+_redis_limiter_lock = threading.Lock()
+_redis_limiter: RedisHostRateLimiter | None = None
+
+
+def _is_redis_backend_enabled() -> bool:
+    """``True`` iff the admin knob *and* a redis URL are both set.
+
+    Wraps :func:`app.host_rate_limit_redis.is_configured` so the
+    dispatch in ``acquire`` does not pay the import cost on the
+    default in-memory path.
+    """
+    try:
+        from . import host_rate_limit_redis as redis_mod
+    except Exception:
+        return False
+    try:
+        return bool(redis_mod.is_configured())
+    except Exception:
+        return False
+
+
+def _get_redis_limiter() -> RedisHostRateLimiter:
+    """Return a process-singleton Redis limiter.
+
+    The constructor never opens the connection — the first
+    ``acquire`` triggers the lazy ``redis.Redis.from_url`` round-trip
+    via :meth:`RedisHostRateLimiter._ensure_client`. Caching here
+    means we don't pay the constructor cost on every probe.
+    """
+    global _redis_limiter
+    if _redis_limiter is not None:
+        return _redis_limiter
+    with _redis_limiter_lock:
+        if _redis_limiter is None:
+            from .host_rate_limit_redis import RedisHostRateLimiter
+
+            _redis_limiter = RedisHostRateLimiter()
+    return _redis_limiter
+
+
+def reset_redis_limiter_for_tests() -> None:
+    """Drop the cached Redis limiter so tests can rebuild it."""
+    global _redis_limiter
+    with _redis_limiter_lock:
+        _redis_limiter = None
+
+
+def active_backend() -> str:
+    """``"redis"`` when 9b is configured, else ``"memory"``.
+
+    Used by :func:`status` to surface the active backend on
+    ``/api/health.host_rate_limit.backend`` so an operator dashboard
+    can verify cluster mode is live without firing a probe.
+    """
+    return "redis" if _is_redis_backend_enabled() else "memory"
+
+
 def status() -> dict[str, object]:
     """Compact descriptor for ``/api/health``."""
     return {
         "enabled": _enabled_knob() == 1,
         "rate_per_min": _live_rate_per_min(),
+        "backend": active_backend(),
     }

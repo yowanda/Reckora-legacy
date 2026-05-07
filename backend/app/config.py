@@ -364,5 +364,31 @@ class Settings(BaseSettings):
     anti_bot_playwright_max_per_scan: int = 5
     anti_bot_playwright_timeout_sec: int = 10
 
+    # Phase 9b: distributed host rate limit (closes residual risk M1
+    # per-process token bucket; MEDIUM).
+    #
+    # The Phase 8b ``host_rate_limit.py`` ships a per-process token
+    # bucket. That works for a single API container but a Celery
+    # fan-out (Phase 8a) gives every worker its own bucket so the
+    # effective rate towards a host is N x ``host_rate_per_min`` when N
+    # workers are scanning concurrently. 9b adds a Redis-backed
+    # sliding-window counter that uses one atomic Lua script for the
+    # ``INCR + EXPIRE + check`` round-trip — N workers now share one
+    # bucket per host so the rate stays at the configured value
+    # regardless of fan-out width.
+    #
+    # Default ``host_rate_limit_use_redis=0`` keeps the in-memory
+    # bucket — HF Space's single-container deployment doesn't need
+    # the Redis hop. Operators who run Celery workers flip the knob
+    # to ``1`` after wiring up ``host_rate_limit_redis_url`` (or
+    # leaving it blank to reuse the Phase 8a Celery broker URL).
+    #
+    # If the Redis transport ever fails at runtime the limiter falls
+    # *open* to the in-memory bucket so a Redis outage doesn't
+    # fail-closed every probe — being briefly too-fast on rate is
+    # better than being completely stuck.
+    host_rate_limit_use_redis: int = 0
+    host_rate_limit_redis_url: str = ""
+
 
 settings = Settings()
