@@ -78,15 +78,46 @@ once `command git push origin main` returns and CI is green.
 - [x] **8-deploy** — HF Space mirror sync to catch up with main 34a79d1 (Phase 8a + 8b + 8c + 8d, all opt-in via admin knobs / Docker image rebuild required for [gql] extra; rsync-mirrored to HF Space `0551938` → `5723927`; Docker rebuild green; `GET /api/health` 200 with `sites=2506`, `proxy_pool.configured=0` and `host_rate_limit.enabled=false` (8b knobs default off), `graphql.installed=false` (8c [gql] extra not bundled in HF Dockerfile by design — knob check happens after install check), `share_links.enabled=false` (8d knob default off); endpoint behaviour byte-for-byte verified — `POST /api/graphql` returns 503 with remediation message, `GET /share/{token}` returns 503 ("share links disabled"), `POST /api/history/{id}/share` returns 401 ("login required") proving the auth-gated route is reachable; Phase 6+7 endpoints (`POST /api/enrich/email`, `POST /api/reverse-image`, `GET /api/admin/ml/status`, `GET /api/permute/strategies`) all still return 401 confirming no regression; `diff -rq --exclude=.git --exclude=.venv --exclude=__pycache__ /home/ubuntu/repos/Reckora /tmp/hf-space` reports 0 differences confirming byte-for-byte parity)
 - [x] **8d** — public-scan edge cache (`backend/app/share_links.py` adds a `share_links` SQLite table + mint / lookup / revoke / cascade-revoke / purge primitives over a 192-bit URL-safe random token; the auth-gated `POST /api/history/{scan_id}/share` mints a token with optional `ttl_sec` capped by the admin-tunable `share_link_default_ttl_sec`, `GET /api/history/{scan_id}/shares` lists the caller's active tokens, `DELETE /api/history/{scan_id}/share/{token}` revokes one, and `DELETE /api/history/{scan_id}` cascades the revoke so a deleted scan can never be revived through a stale link; the public anonymous endpoint `GET /share/{token}` returns the same shape as the auth-gated single-scan view plus CDN-friendly cache headers — `Cache-Control: public, s-maxage=<knob>, stale-while-revalidate=<knob/2>`, an ETag derived from `sha256(token \| finished_at)[:16]`, and `Vary: accept-encoding` so a Cloudflare-class CDN can cache one entry per encoding; `If-None-Match` short-circuits to 304 with the same cache headers so a revalidating edge doesn't pay the database lookup twice; ownership is verified by reading the parent scan with the caller's username (cross-member returns 404, so a scanned target's id can't be probed for); a per-scan cap (`share_link_max_per_scan`, default 5) prevents tokens from accumulating without bound; the `enable_share_links` knob (default 0) makes every endpoint 503 until an operator opts in, and `/api/health.share_links.{enabled, cache_max_age_sec}` lets a dashboard verify the configuration without firing a query; 15 new backend tests in `tests/test_share_links.py` cover storage primitives (mint, cap, lookup, expiry, revoke, cascade, purge-expired, etag stability), HTTP knob gate (mint / list / revoke / public 503 when off), end-to-end mint → list → public read → 304 revalidation → revoke round trip, cross-member privacy guard, and parent-scan delete cascade)
 
-### Phase 9 — distribution ergonomics  *(out-of-scope, gated on user demand)*
+### Phase 9 — anti-bot probe + scale-out reliability  *(planned)*
+
+> **Goal:** close the residual-risk gaps that Phase 8 (proxy rotator + per-host
+> rate limit) does not cover. Phase 8b spreads request load across IPs and
+> across time, but it does not change the *fingerprint* of each individual
+> request (Phase 9a / C1 + C2), the *coordination* of the rate-limit budget
+> across N Celery workers (Phase 9b / M1), the *region* of the egress IP
+> (Phase 9c / M2), the *labelling accuracy* when a site challenges with a
+> CAPTCHA instead of a 429 (Phase 9d / M3), the *freshness* of the bundled
+> site catalog (Phase 9e / M4), the *time + cost cap* of a long-tail scan
+> (Phase 9f / M5), the *reputation curve* of a freshly-added proxy in the
+> pool (Phase 9g / M6), or the *cold-start latency* of an idle HF Space
+> container (Phase 9h / M7). Each sub-phase below includes the residual-
+> risk ID it closes (`C1`, `M1`, etc.) so the analysis stays traceable.
+>
+> **All Phase 9 capabilities ship opt-in (admin knob default 0)** — same
+> contract as Phase 8 — so the live HF Space stays byte-for-byte unchanged
+> in default deployment.
+
+- [ ] **9a** — anti-bot probe pipeline (closes residual risk **C1** Cloudflare/Akamai/Datadome JS challenge + **C2** TLS / JA3 / JA4 fingerprint blocking, both **CRITICAL**; new module `backend/app/anti_bot_transport.py` wraps `curl-cffi` (already a dependency from Phase 1, currently used only in `chrome_tls_rescue` for a small allowlist) into an `httpx.AsyncBaseTransport` with `impersonate="chrome120"` / `impersonate="safari17"` / `impersonate="firefox120"` selectable per-host so a WAF that fingerprints TLS handshake bytes (cipher suite ordering + extension list = JA3/JA4) sees a real browser handshake instead of the Python uvloop default; new module `backend/app/playwright_fallback.py` shells out to a headless chromium (`playwright install chromium` lazy-installed at first use) with a 10s budget when a curl-cffi impersonation still returns a JS challenge HTML (`<title>Just a moment...</title>`, `<title>Attention Required! \| Cloudflare</title>`, Datadome challenge meta tag), parses the post-challenge response, and feeds it back into the regex / engine probe — limited to a configurable per-scan budget (`anti_bot_playwright_max_per_scan`, default 5) so a worst-case 2,500-site scan can't fan out 2,500 chromium spawns; new admin knobs `enable_anti_bot_pipeline` (default 0), `anti_bot_default_impersonation` (string default `"chrome120"`), `anti_bot_playwright_fallback` (default 0), `anti_bot_playwright_max_per_scan` (default 5), `anti_bot_playwright_timeout_sec` (default 10); per-site override via a new `anti_bot_profile` field in `site_overrides` so a site that needs Safari TLS while default is Chrome can be tagged individually; `app/transport.py` gains a `build_anti_bot_client()` factory that wires `RotatingProxyTransport` (Phase 8b) over `AntiBotTransport` so proxy rotation + impersonation compose correctly; `/api/health` exposes `anti_bot.{enabled, default_impersonation, playwright_fallback, playwright_chrome_installed}` so an operator can verify chromium is installed without firing a probe; expected miss-rate reduction on Cloudflare-fronted sites: 80–150 sites recovered from UNKNOWN to CLAIMED/FREE; ~25 new backend tests covering impersonation header injection, JA3 hash stability, challenge HTML detection regex, Playwright spawn budget enforcement, per-site override resolution, and the transport-stacking contract (Phase 8b proxy rotator stays on the outside, Phase 9a impersonation on the inside))
+- [ ] **9b** — distributed host rate limit (closes residual risk **M1** per-process token bucket; **MEDIUM**; replaces in-memory `host_rate_limit.py` (Phase 8b) with a Redis-backed sliding-window counter using a single atomic Lua script for the `INCR + EXPIRE + check` round-trip so N Celery workers share one bucket per host; new admin knob `host_rate_limit_backend` (`"memory"` default, `"redis"` opt-in) — switching to Redis only if `RECKORA_REDIS_URL` is set (same connection string the Phase 8a Celery broker reuses); fall-open to in-memory bucket on Redis transport error so a Redis outage doesn't fail-closed every probe; `/api/health.host_rate_limit.backend` surfaces the active backend so a dashboard can verify cluster mode is live; ~12 new backend tests in `tests/test_host_rate_limit_redis.py` (skipped unless `RECKORA_REDIS_URL` is set in CI matrix; CI gains a `redis-stack` service container exclusively for this job) cover atomic refill, multi-worker token contention via `asyncio.gather` of 4 simulated workers, and the fall-open path)
+- [ ] **9c** — geo-aware proxy selection (closes residual risk **M2** round-robin pool ignores region locks; **MEDIUM**; extend `RECKORA_PROXY_POOL_URLS` parser to accept `region:scheme://host:port` syntax (e.g. `"us-east:socks5://a.example,eu-west:socks5://b.example,ru:socks5://c.example"`) — bare URLs continue to work and are tagged `region="default"`; add a new optional `preferred_region` field to per-site catalog entries (catalog regen scripts in 9e learn this for known geo-locked sites — Yandex/VK = `"ru"`, Sina Weibo = `"cn"`, Naver = `"kr"`, etc.); selection logic in `proxy_pool.pick()` prefers a proxy whose region matches the target site's `preferred_region`, falls back to `"default"` proxies when no regional match is available, then falls back to any healthy proxy as a last resort so a single-region pool still works; new admin knob `enable_geo_aware_proxy` (default 0) so the Phase 8b round-robin behaviour is preserved unless explicitly opted in; expected miss-rate reduction: ~30–60 region-locked sites; ~10 new tests covering region-tag parser, preferred-region match, fallback chain, and the fail-open contract when no regional proxy is healthy)
+- [ ] **9d** — CAPTCHA classifier + structured `UNKNOWN` labelling (closes residual risk **M3** silent UNKNOWN on CAPTCHA challenge; **MEDIUM**; new module `backend/app/captcha_signatures.py` ships a curated regex / selector signature DB for reCAPTCHA v2 (`<iframe src="https://www.google.com/recaptcha/api2/anchor`), reCAPTCHA v3 (script src match), hCaptcha (`<script src="https://hcaptcha.com/1/api.js`), Cloudflare Turnstile (`<script src="https://challenges.cloudflare.com/turnstile`), Datadome (`window._dd` script), AWS WAF Captcha, FunCaptcha, Geetest, and the generic `<form action="/captcha"` Apache module pattern; checker pipeline classifies a 200-OK response that matches a CAPTCHA signature as `UNKNOWN` with `reason="captcha_required"` (instead of the current generic `reason="anomalous_response"`) so the SPA can render a dedicated badge and the operator knows whether to flip the Phase 9a Playwright fallback knob or skip the host entirely; per-CAPTCHA-vendor counts surface in `/api/admin/ml/status` so an operator can see "47 sites returned Cloudflare Turnstile this week"; ~15 new tests covering each signature, false-positive guards (e.g. a site that mentions "captcha" in a footer link should not match), and the SPA badge rendering contract via the existing `result.reason` string)
+- [ ] **9e** — catalog auto-refresh from upstream maigret (closes residual risk **M4** ~5%/year drift in bundled catalog; **MEDIUM**; new script `scripts/regen-from-maigret.py` clones the latest `soxoj/maigret` release tag into a temp dir, parses `maigret/resources/data.json`, diffs against `backend/app/sites_data.json`, classifies each delta as one of `{added, removed, url_changed, identityType_changed, engine_hint_changed}`, and writes a structured PR-ready markdown report plus the regenerated `sites_data.json` candidate; new GitHub Action workflow `.github/workflows/catalog-regen.yml` (cron `0 5 1 */3 *` = first day of every quarter) runs the script, opens a PR titled `chore(catalog): quarterly refresh from soxoj/maigret <tag>` with the diff report inlined, and pings the maintainer; the regen pipeline preserves Reckora-specific fields (`engine_hints`, `identityTypes` overrides, Phase 6 trim flags) so a quarterly catalog refresh doesn't undo Phase 6 precision wins; expected impact: drift drops from ~5%/year to ≤1%/quarter; no runtime feature, no admin knob, no test surface beyond the script's own unit tests for the diff classifier (~8 tests))
+- [ ] **9f** — per-scan hard budget + `SKIPPED` bucket (closes residual risk **M5** scan tail-latency runaway; **MEDIUM**; replace the existing `scan_timeout_sec` (which only caps total elapsed) with a triple-budget model: `scan_max_total_sec` (hard kill — 300s default), `scan_per_site_timeout_sec` (per-probe budget — 8s default, separate from `httpx` connect/read timeouts), and `scan_max_concurrent_skips` (after this many sequential probe-budget exceedances the remaining sites are bulk-marked SKIPPED — 50 default); new bucket `SKIPPED` next to CLAIMED / FREE / BLOCKED / UNKNOWN with `reason="budget_exceeded" \| "scan_total_killed"` so an operator can re-run only the SKIPPED rows instead of the whole scan; SPA gets a `Stats` panel `Filtered (budget)` counter; ~10 new tests covering the cumulative-budget bookkeeping, the bulk-skip threshold path, and the SSE `event: skipped` frame format)
+- [ ] **9g** — proxy reputation warm-up + weighted selection (closes residual risk **M6** fresh proxy = poor WAF reputation; **MEDIUM**; extend `app/proxy_pool.py` with per-proxy `success_count` / `failure_count` rolling counters (sliding window of last 100 requests per proxy, in-memory only — no Redis dependency), expose a `weight = success_count / max(1, success_count + failure_count)` ratio, and bias `pool.pick()` to prefer high-weight proxies once each proxy has accumulated ≥ `proxy_warmup_min_requests` (default 50) requests so a freshly-added proxy still gets routed traffic to build reputation but a known-bad proxy is naturally de-prioritised; new admin knob `enable_proxy_pool_weighted_selection` (default 0) — round-robin behaviour preserved when knob is off; new admin knob `proxy_warmup_min_requests` (default 50); `/api/health.proxy_pool.members[].weight` exposes per-proxy weight so an operator can see "proxy A 0.94 / proxy B 0.32 — proxy B is dragging the pool down"; ~10 new tests covering weight calculation, warm-up window enforcement, weighted-random selection statistical fairness, and the round-robin fallback when the knob is off)
+- [ ] **9h** — HF Space keep-warm cron (closes residual risk **M7** cold-start latency; **MEDIUM-LOW**; new GitHub Action workflow `.github/workflows/hf-keep-warm.yml` (cron `*/30 * * * *`) hits `GET https://yesmyyt-cacadoxx.hf.space/api/health` every 30 minutes so the HF Space free-tier container stays warm and a returning user hits a sub-second response instead of the 30–45s Docker boot; no runtime change, no admin knob, no test surface beyond a `workflow_dispatch` smoke run; alternative migrate to HF Spaces "Always On" tier when budget allows — left as a comment in the workflow for the operator)
+
+### Phase 9-distribution — distribution ergonomics  *(out-of-scope, gated on user demand)*
 
 > Items not on the committed plan. They close gaps in maigret's distribution
-> surface (single-CLI binary, plugin community), not accuracy / scale, so
-> they're parked until explicitly requested.
+> surface (single-CLI binary, plugin community, PyPI publish, public docs
+> site), not accuracy / scale, so they're parked until explicitly requested.
 
-- [ ] **9a** — `reckora-cli` thin CLI wrapper (~200 LOC)
-- [ ] **9b** — plugin SDK (`backend/app/plugins/` + stable `Site` ABC)
-- [ ] **9c** — single-binary release (PyInstaller / Nuitka)
+- [ ] **9-distribution-cli** — `reckora-cli` thin CLI wrapper (~200 LOC) calling the existing REST + SSE endpoints over HTTPS, packaged as a `pip install reckora-cli`-able wheel; gives users who prefer one-liner scans the same UX maigret has from PyPI without forking the server logic
+- [ ] **9-distribution-plugin** — plugin SDK (`backend/app/plugins/` directory + a stable `Site` ABC + a registration entry-point group) so the community can drop in adapters for niche sites without forking `sites.json`; doubles as the migration path for the catalog rule DSL (richer than maigret's regex-only model — JSONPath on JSON responses, CSS selector + text-match on HTML, structured signals like `og:title contains <username>`)
+- [ ] **9-distribution-binary** — single-binary release (PyInstaller / Nuitka) for users who want a single-file distribution without Python or Docker
+- [ ] **9-distribution-pypi** — publish the backend as a `pip install reckora`-able wheel + frontend bundled via Docker entry-point; closes maigret's distribution edge directly
+- [ ] **9-distribution-docs** — public docs site (Mintlify / Docusaurus) auto-generating REST API reference (from FastAPI OpenAPI) + GraphQL schema reference (from `graphql_api.py`) + admin knobs reference (from `admin_settings.KNOBS`) so newcomers don't have to read `ROADMAP.md` to onboard
+- [ ] **9-distribution-license** — declare a public license (AGPL-3.0 mirrors maigret's GPL-3.0 ethos and protects the SaaS form factor); current state is "all rights reserved by default" which blocks external contributors
 
 ---
 
@@ -506,22 +537,184 @@ These are non-negotiable guards I run on **every** batch before pushing to `main
 
 ---
 
-## Out of scope
+## Phase 9 — anti-bot probe + scale-out reliability  *(detailed scope)*
 
-Items the user has not asked for but that are natural follow-ons:
+> **Why this is its own phase:** Phase 8 closes the *coordination* gaps in
+> Reckora's egress (multi-proxy fleet + per-host rate limit budgeting + at-
+> least-once Celery delivery). It does not close the *fingerprint* gaps
+> (Cloudflare/Akamai/Datadome WAF JS challenge, JA3/JA4 TLS handshake
+> classification), the *cluster-coordination* gap of the rate-limit budget
+> across N Celery workers, the *region* of the egress IP, the *labelling
+> accuracy* when a site responds with a CAPTCHA instead of a 429, the
+> *freshness* of the bundled site catalog, the *time + cost cap* of a long-
+> tail scan, the *reputation curve* of a freshly-added proxy, or the *cold-
+> start latency* of an idle HF Space container. Phase 9 picks each of those
+> apart with a dedicated knob-gated sub-phase. The residual-risk IDs (`C1`,
+> `C2`, `M1`–`M7`) come from the Phase 8 deploy debrief and are surfaced in
+> the master checklist entries above.
 
-- **Phase 9 (CLI parity)**: a thin `reckora-cli` wrapper for users who prefer
-  one-liner CLI scans (maigret's strongest distribution surface). Estimated
-  ~200 LOC; would also require packaging the backend as a `pip install`-able
-  wheel with an `[api]` extra.
-- **Phase 9 (plugin SDK)**: `app/plugins/` directory + a stable `Site` ABC so
-  the community can drop in adapters for niche sites without forking
-  `sites.json`.
-- **Phase 9 (single-binary release)**: PyInstaller / Nuitka bundle for users
-  who want a single-file distribution.
+### 9a — anti-bot probe pipeline (closes residual risks **C1** + **C2**, severity **CRITICAL**)
 
-These three Phase 9 items are about *distribution ergonomics*, not accuracy
-or scale, so they're parked until a downstream user explicitly asks for them.
+- `app/anti_bot_transport.py` wraps `curl-cffi` (already a Phase 1 dependency
+  used only by `chrome_tls_rescue` for a small allowlist) into an
+  `httpx.AsyncBaseTransport` with `impersonate="chrome120" | "safari17" |
+  "firefox120"` selectable per-host so a WAF that fingerprints the TLS
+  handshake (cipher suite ordering + extension list = JA3 / JA4 hash) sees
+  a real browser handshake instead of the Python uvloop default.
+- `app/playwright_fallback.py` shells out to a headless chromium when a
+  curl-cffi impersonation still returns a JS challenge HTML — limited to a
+  configurable per-scan budget so a worst-case 2,500-site scan can't fan
+  out 2,500 chromium spawns.
+- Per-site override via a new `anti_bot_profile` field in `site_overrides`
+  so a site that needs Safari TLS while default is Chrome can be tagged
+  individually without affecting the rest of the catalog.
+- New admin knobs: `enable_anti_bot_pipeline` (default 0),
+  `anti_bot_default_impersonation` (string, default `"chrome120"`),
+  `anti_bot_playwright_fallback` (default 0),
+  `anti_bot_playwright_max_per_scan` (default 5),
+  `anti_bot_playwright_timeout_sec` (default 10).
+- `app/transport.py` gains `build_anti_bot_client()` so the Phase 8b
+  `RotatingProxyTransport` stacks correctly *over* the Phase 9a
+  impersonation transport (proxy rotation outside, fingerprint inside).
+- `/api/health.anti_bot.{enabled, default_impersonation,
+  playwright_fallback, playwright_chrome_installed}` so an operator can
+  verify chromium is installed without firing a probe.
+- Acceptance: 80–150 sites recover from `UNKNOWN` to `CLAIMED` / `FREE` on
+  a Cloudflare-fronted catalog subset; pytest baseline +25 tests; ruff /
+  mypy clean.
+
+### 9b — distributed host rate limit (closes **M1**, severity **MEDIUM**)
+
+- Replace the in-memory token bucket from Phase 8b with a Redis-backed
+  sliding-window counter (single atomic Lua script handles `INCR + EXPIRE
+  + check`) so N Celery workers share one bucket per host.
+- New admin knob `host_rate_limit_backend` — `"memory"` default,
+  `"redis"` opt-in (only honoured when `RECKORA_REDIS_URL` is set, same
+  connection string as the Phase 8a Celery broker).
+- Fail-open to in-memory bucket on Redis transport error so a Redis
+  outage doesn't fail-closed every probe.
+- `/api/health.host_rate_limit.backend` surfaces the active backend.
+- Acceptance: a 4-worker `asyncio.gather` simulation respects a 60/min/host
+  bucket as a *cluster-wide* total (not 240/min as today); `+12` tests
+  added behind a CI matrix entry that spins a `redis-stack` service
+  container exclusively for the new test file.
+
+### 9c — geo-aware proxy selection (closes **M2**, severity **MEDIUM**)
+
+- Extend `RECKORA_PROXY_POOL_URLS` parser to accept
+  `region:scheme://host:port` syntax (bare URLs continue to work, tagged
+  `region="default"`).
+- New optional `preferred_region` field on per-site catalog entries; the
+  9e regen script learns this for known geo-locked sites (Yandex / VK =
+  `"ru"`, Sina Weibo = `"cn"`, Naver = `"kr"`, etc.).
+- `proxy_pool.pick()` prefers a regional match → `"default"` → any
+  healthy proxy as the last fallback, so a single-region pool still
+  works.
+- New admin knob `enable_geo_aware_proxy` (default 0).
+- Acceptance: 30–60 region-locked sites recover; round-robin behaviour
+  preserved when knob is off; `+10` tests.
+
+### 9d — CAPTCHA classifier + structured `UNKNOWN` labelling (closes **M3**, severity **MEDIUM**)
+
+- `app/captcha_signatures.py` ships a curated regex / selector signature
+  DB for reCAPTCHA v2 / v3, hCaptcha, Cloudflare Turnstile, Datadome,
+  AWS WAF Captcha, FunCaptcha, Geetest, plus the generic Apache form-
+  action pattern.
+- Checker pipeline classifies a 200-OK response that matches a CAPTCHA
+  signature as `UNKNOWN` with `reason="captcha_required"` (instead of
+  the current generic `reason="anomalous_response"`) so the SPA renders
+  a dedicated badge.
+- Per-vendor counts surface in `/api/admin/ml/status` so an operator can
+  see "47 sites returned Cloudflare Turnstile this week".
+- `+15` tests covering each signature, false-positive guards, and the
+  SPA badge contract.
+
+### 9e — catalog auto-refresh from upstream maigret (closes **M4**, severity **MEDIUM**)
+
+- `scripts/regen-from-maigret.py` clones the latest `soxoj/maigret`
+  release tag, parses `maigret/resources/data.json`, diffs against
+  `backend/app/sites_data.json`, classifies each delta as one of
+  `{added, removed, url_changed, identityType_changed,
+  engine_hint_changed}`, and writes a structured PR-ready markdown
+  report plus the regenerated catalog candidate.
+- New GitHub Action `.github/workflows/catalog-regen.yml` (cron
+  `0 5 1 */3 *` = first day of every quarter) runs the script and opens
+  a PR titled `chore(catalog): quarterly refresh from soxoj/maigret
+  <tag>` with the diff inlined.
+- The regen pipeline preserves Reckora-specific fields (`engine_hints`,
+  `identityTypes` overrides, Phase 6 trim flags) so a refresh doesn't
+  undo Phase 6 precision wins.
+- Acceptance: drift drops from ~5%/year to ≤1%/quarter; `+8` tests for
+  the diff classifier.
+
+### 9f — per-scan hard budget + `SKIPPED` bucket (closes **M5**, severity **MEDIUM**)
+
+- Replace the existing single `scan_timeout_sec` with a triple-budget
+  model: `scan_max_total_sec` (300s default — hard kill),
+  `scan_per_site_timeout_sec` (8s default — separate from
+  `httpx.connect/read` timeouts), and `scan_max_concurrent_skips` (50
+  default — bulk-skip threshold).
+- New result bucket `SKIPPED` next to CLAIMED / FREE / BLOCKED / UNKNOWN
+  with `reason="budget_exceeded" | "scan_total_killed"`; SPA Stats panel
+  gains a `Filtered (budget)` counter; operator can re-run only the
+  SKIPPED rows instead of the whole scan.
+- `+10` tests covering cumulative-budget bookkeeping, the bulk-skip
+  threshold path, and the SSE `event: skipped` frame format.
+
+### 9g — proxy reputation warm-up + weighted selection (closes **M6**, severity **MEDIUM**)
+
+- Extend `proxy_pool.py` with per-proxy `success_count` /
+  `failure_count` rolling counters (sliding window of last 100 requests
+  per proxy, in-memory only — no extra Redis dependency), expose a
+  `weight = success / (success + failure)` ratio, and bias `pool.pick()`
+  to prefer high-weight proxies once each proxy has accumulated
+  ≥ `proxy_warmup_min_requests` (default 50) requests.
+- New admin knobs: `enable_proxy_pool_weighted_selection` (default 0),
+  `proxy_warmup_min_requests` (default 50).
+- `/api/health.proxy_pool.members[].weight` exposes per-proxy weight so
+  an operator can see "proxy A 0.94 / proxy B 0.32 — proxy B is dragging
+  the pool down".
+- `+10` tests covering weight calculation, warm-up window enforcement,
+  weighted-random fairness, and the round-robin fallback when the knob
+  is off.
+
+### 9h — HF Space keep-warm cron (closes **M7**, severity **MEDIUM-LOW**)
+
+- New GitHub Action `.github/workflows/hf-keep-warm.yml` (cron
+  `*/30 * * * *`) hits `GET https://yesmyyt-cacadoxx.hf.space/api/health`
+  every 30 minutes so the HF Space free-tier container stays warm.
+- Alternative: migrate to HF Spaces "Always On" tier when budget allows
+  — left as a comment in the workflow for the operator.
+- Acceptance: returning user hits a sub-second response instead of the
+  30–45s Docker boot.
+
+---
+
+## Out of scope (Phase 9-distribution)
+
+> Items the user has not asked for but that are natural follow-ons. These
+> close maigret's *distribution* surface (PyPI publish, public docs site,
+> single-CLI binary, plugin community), not accuracy / scale, so they're
+> parked until explicitly requested.
+
+- **9-distribution-cli**: `reckora-cli` thin wrapper (~200 LOC) calling
+  the existing REST + SSE endpoints over HTTPS, packaged as a
+  `pip install reckora-cli`-able wheel.
+- **9-distribution-plugin**: `app/plugins/` directory + a stable `Site`
+  ABC + an entry-point group so the community can drop in adapters for
+  niche sites without forking `sites.json`. Doubles as the migration
+  path for the catalog rule DSL (richer than maigret's regex-only model:
+  JSONPath on JSON responses, CSS selectors, structured signals).
+- **9-distribution-binary**: PyInstaller / Nuitka single-file
+  distribution.
+- **9-distribution-pypi**: publish the backend as a `pip install
+  reckora`-able wheel with the frontend bundled via Docker.
+- **9-distribution-docs**: public docs site (Mintlify / Docusaurus)
+  auto-generating REST API reference (from FastAPI OpenAPI), GraphQL
+  schema reference (from `graphql_api.py`), and admin knobs reference
+  (from `admin_settings.KNOBS`).
+- **9-distribution-license**: declare a public license (AGPL-3.0
+  mirrors maigret's GPL-3.0 ethos and protects the SaaS form factor).
 
 ---
 

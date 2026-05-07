@@ -42,7 +42,8 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 5 — operator polish | shipped (8/8: 5a–5h incl. 5h-A–E + 5h-FE + 5h-deploy) | 2,506+ | 0–100 + ML | yes | yes | yes | yes | yes (depth admin-tunable) | yes |
 | 6 — accuracy & gap closure vs maigret | shipped (4/4: 6a, 6b, 6c, 6d) | **2,506** (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
 | 7 — intel & enrichment | shipped 4/4 (**7a** pHash + **7b** WHOIS/HIBP + **7c** reverse-image + **7d** ML retrain + drift) | 2,506+ | 0–100 + ML retrainable | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image/ML drift |
-| 8 — scale & infra | planned ([ROADMAP](./ROADMAP.md)) | 3,000+ | 0–100 + ML | yes (distributed worker fleet) | yes | yes | yes (rotating proxy) | yes | yes |
+| 8 — scale & infra | shipped (4/4: 8a Celery+Redis, 8b proxy rotator, 8c GraphQL gateway, 8d public-scan edge cache; deployed `0551938 → 5723927`) | 2,506 | 0–100 + ML | yes (distributed worker fleet, opt-in) | yes | yes | yes (rotating proxy pool, opt-in) | yes | yes |
+| 9 — anti-bot probe + scale-out reliability | planned 8 sub-phases ([ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via 9e | 0–100 + ML | yes (distributed rate limit via 9b) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via 9a; geo-aware via 9c; CAPTCHA classifier via 9d) | yes | yes |
 
 > [`ROADMAP.md`](./ROADMAP.md) is the **single source of truth** for what's
 > in flight + planned. The "Live status" header at the top of the roadmap is
@@ -66,14 +67,36 @@ against live HF Space, and is benchmarked here with concrete numbers.
 > feature distribution against the synthetic training set, with
 > per-feature alarms surfaced in a new admin **ML** tab. Together
 > they open new dimensions of OSINT signal beyond maigret. Phase
-> 8 makes the platform horizontally scalable.
+> 8 made the platform horizontally scalable — **8a** distributed
+> Celery + Redis worker fleet (opt-in via `RECKORA_USE_CELERY=1`),
+> **8b** rate-limit-aware multi-proxy rotator with per-host async
+> token bucket (opt-in via `enable_proxy_rotator=1` +
+> `enable_host_rate_limit=1`), **8c** GraphQL gateway as an alternate
+> transport over the existing REST/SSE surface (opt-in via the
+> optional `[gql]` extra + `enable_graphql_gateway=1`), **8d** public-
+> scan edge cache with CDN-friendly Cache-Control / ETag / 304
+> revalidation for anonymous share links (opt-in via
+> `enable_share_links=1`). All four sub-phases ship default-off so
+> the live HF Space byte-for-byte mirror of `main` stays unchanged in
+> default deployment. Phase 9 is the next planned batch — it closes
+> the residual-risk gaps that Phase 8b's proxy rotator does *not*
+> cover (TLS / JA3 / JA4 fingerprint blocking, Cloudflare /
+> Akamai / Datadome JS challenge, distributed rate-limit
+> coordination across Celery workers, geo-aware proxy selection,
+> CAPTCHA classifier + structured `UNKNOWN` labelling, quarterly
+> catalog auto-refresh from upstream maigret, per-scan hard budget
+> with a new `SKIPPED` bucket, proxy reputation warm-up / weighted
+> selection, and an HF Space keep-warm cron). Each Phase 9 sub-
+> phase carries the residual-risk ID it closes (`C1`, `C2`, `M1`–`M7`
+> from the Phase 8 deploy debrief) and is detailed in
+> [`ROADMAP.md`](./ROADMAP.md).
 
 ### Phase 5 — operator polish (8/8 sub-phases shipped)
 
 Phase 5 lands as a stream of focused commits, each landing direct-to-main with
 its own CI green + auto-deploy to the HF Space. The sub-phase letters reflect
 implementation order, not feature priority. The current state of every
-sub-phase + planned Phase 6-8 work is tracked in [`ROADMAP.md`](./ROADMAP.md).
+sub-phase + planned Phase 9 work is tracked in [`ROADMAP.md`](./ROADMAP.md).
 
 | Sub-phase | Commit | One-liner |
 | --- | --- | --- |
