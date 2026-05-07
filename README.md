@@ -43,7 +43,7 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 6 — accuracy & gap closure vs maigret | shipped (4/4: 6a, 6b, 6c, 6d) | **2,506** (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
 | 7 — intel & enrichment | shipped 4/4 (**7a** pHash + **7b** WHOIS/HIBP + **7c** reverse-image + **7d** ML retrain + drift) | 2,506+ | 0–100 + ML retrainable | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image/ML drift |
 | 8 — scale & infra | shipped (4/4: 8a Celery+Redis, 8b proxy rotator, 8c GraphQL gateway, 8d public-scan edge cache; deployed `0551938 → 5723927`) | 2,506 | 0–100 + ML | yes (distributed worker fleet, opt-in) | yes | yes | yes (rotating proxy pool, opt-in) | yes | yes |
-| 9 — anti-bot probe + scale-out reliability | in-flight (3/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; **9c** geo-aware proxy selection shipped — `ecbebef`; 9d–9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via 9e | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware proxy selection via **9c — shipped**; CAPTCHA classifier via 9d) | yes | yes |
+| 9 — anti-bot probe + scale-out reliability | in-flight (4/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; **9c** geo-aware proxy selection shipped — `ecbebef`; **9d** CAPTCHA classifier + structured `UNKNOWN` labelling shipped — `18903bc`; 9e–9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via 9e | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware proxy selection via **9c — shipped**; CAPTCHA classifier via **9d — shipped**) | yes | yes |
 
 > [`ROADMAP.md`](./ROADMAP.md) is the **single source of truth** for what's
 > in flight + planned. The "Live status" header at the top of the roadmap is
@@ -111,12 +111,28 @@ against live HF Space, and is benchmarked here with concrete numbers.
 > — closing residual-risk **M2** (round-robin pool ignores
 > region locks; **MEDIUM**). Opt-in via the
 > `enable_geo_aware_proxy` admin knob; default 0 preserves the
-> Phase 8b round-robin behaviour byte-for-byte. The remaining
-> 5 sub-phases (9d–9h) cover CAPTCHA classifier + structured `UNKNOWN`
-> labelling, quarterly catalog auto-refresh from upstream
-> maigret, per-scan hard budget with a new `SKIPPED` bucket,
-> proxy reputation warm-up / weighted selection, and an HF
-> Space keep-warm cron. Each Phase 9 sub-phase carries the
+> Phase 8b round-robin behaviour byte-for-byte.
+> **9d (CAPTCHA classifier + structured `UNKNOWN` labelling) is
+> shipped** (`18903bc`): a curated regex bank in
+> `backend/app/captcha_signatures.py` recognises ten CAPTCHA
+> vendors (reCAPTCHA v2 / v3, hCaptcha, Cloudflare Turnstile,
+> Datadome, AWS WAF Captcha, Arkose / FunCaptcha, Geetest,
+> PerimeterX, plus a generic `<form action="/captcha">`
+> fallback) and stamps a vendor-specific
+> `reason="captcha_<vendor>"` on BLOCKED `CheckResult`s so the
+> SPA can render a vendor-aware badge instead of the generic
+> `body-fingerprint-block` signal; a rolling per-vendor counter
+> surfaces via `GET /api/admin/ml/status.captcha_vendors_seen`
+> so an operator can see which CAPTCHA fleets are pushing the
+> most BLOCKED rows this week, closing residual-risk **M3**
+> (silent UNKNOWN on CAPTCHA challenge; **MEDIUM**); opt-in via
+> the `enable_captcha_classifier` admin knob with the
+> classifier module gated behind the knob check (never imported
+> on the hot path when off). The remaining 4 sub-phases (9e–9h)
+> cover quarterly catalog auto-refresh from upstream maigret,
+> per-scan hard budget with a new `SKIPPED` bucket, proxy
+> reputation warm-up / weighted selection, and an HF Space
+> keep-warm cron. Each Phase 9 sub-phase carries the
 > residual-risk ID it closes (`C1`, `C2`, `M1`–`M7` from the
 > Phase 8 deploy debrief) and is detailed in
 > [`ROADMAP.md`](./ROADMAP.md).

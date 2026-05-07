@@ -13,7 +13,7 @@
 - **Branch**: `main` (direct push, **no PRs**, never force-push)
 - **Live demo**: <https://yesmyyt-cacadoxx.hf.space> (HF Space; behind `main` HEAD until full Phase 9 deploy — see §7)
 - **Author/committer**: `yowanda <yodadwi4@gmail.com>` (NOT the default Devin author — see §1)
-- **Active phase**: see §3 status table below
+- **Active phase**: 9e (9a + 9b + 9c + 9d shipped — see §3 status table)
 
 Phase 9 closes residual risks from the Phase 8 deploy debrief.
 
@@ -88,13 +88,13 @@ uv run --extra dev ruff format --check .
 uv run --extra dev mypy
 
 # Pytest — choose ONE based on coverage you want:
-uv run --extra dev pytest -q                               # 484 + 7 skipped (no Redis, no GraphQL)
-uv run --extra dev --extra scale --extra gql pytest -q     # 484 + 7 skipped (Redis tests skipped without URL)
+uv run --extra dev pytest -q                               # 510 + 7 skipped (no Redis, no GraphQL)
+uv run --extra dev --extra scale --extra gql pytest -q     # 510 + 7 skipped (Redis tests skipped without URL)
 RECKORA_TEST_REDIS_URL=redis://localhost:6379 \
-  uv run --extra dev --extra scale --extra gql pytest -q   # 491 / 491 (full coverage)
+  uv run --extra dev --extra scale --extra gql pytest -q   # 517 / 517 (full coverage)
 ```
 
-The 491 / 491 baseline is the **gold standard** for any commit that touches `host_rate_limit_redis.py`. CI runs this combo via the `redis:7-alpine` service container declared in `.github/workflows/ci.yml`.
+The 517 / 517 baseline is the **gold standard** for any commit that touches `host_rate_limit_redis.py`. CI runs this combo via the `redis:7-alpine` service container declared in `.github/workflows/ci.yml`.
 
 ### CI poll command (after `git push`)
 
@@ -138,7 +138,7 @@ Expected: 3 check_runs (`backend`, `frontend`, `e2e (Playwright)`), all `status=
 | 9a | anti-bot probe pipeline | C1, C2 (CRITICAL) | shipped | [`b911a72`](https://github.com/yowanda/Reckora/commit/b911a72) | [`7e8073e`](https://github.com/yowanda/Reckora/commit/7e8073e) | 41 |
 | 9b | distributed host rate limit (Redis sliding-window) | M1 (MEDIUM) | shipped | [`b6073af`](https://github.com/yowanda/Reckora/commit/b6073af) | [`3d75879`](https://github.com/yowanda/Reckora/commit/3d75879) | 15 |
 | 9c | geo-aware proxy selection | M2 (MEDIUM) | shipped | [`ecbebef`](https://github.com/yowanda/Reckora/commit/ecbebef) | [`085fb95`](https://github.com/yowanda/Reckora/commit/085fb95) | 18 |
-| 9d | CAPTCHA classifier + structured UNKNOWN labelling | M3 (MEDIUM) | pending | — | — | ~15 |
+| 9d | CAPTCHA classifier + structured UNKNOWN labelling | M3 (MEDIUM) | shipped | [`18903bc`](https://github.com/yowanda/Reckora/commit/18903bc) | _pending docs commit_ | 26 |
 | 9e | quarterly catalog auto-refresh from upstream maigret | M4 (MEDIUM) | pending | — | — | — |
 | 9f | per-scan hard budget with new SKIPPED bucket | M5 (MEDIUM) | pending | — | — | — |
 | 9g | proxy reputation warm-up + weighted selection | M6 (MEDIUM) | pending | — | — | — |
@@ -152,7 +152,8 @@ Expected: 3 check_runs (`backend`, `frontend`, `e2e (Playwright)`), all `status=
 | 9a | 438 + 7 skipped | 458 (+41 tests) |
 | 9b | 466 + 7 skipped | 473 (+15 tests) |
 | 9c | 484 + 7 skipped | 491 (+18 tests) |
-| 9d (target) | ~499 + 7 skipped | ~506 (+15 tests) |
+| 9d | 510 + 7 skipped | 517 (+26 tests) |
+| 9e (target) | ~525 + 7 skipped | ~532 (+15 tests) |
 
 **The number must monotonically grow.** Never delete or weaken existing tests.
 
@@ -161,35 +162,35 @@ Expected: 3 check_runs (`backend`, `frontend`, `e2e (Playwright)`), all `status=
 ```json
 {
   "schema_version": 2,
-  "last_updated": "2026-05-07T06:35:00Z",
+  "last_updated": "2026-05-07T07:30:00Z",
   "session": {
     "git_author": "yowanda <yodadwi4@gmail.com>",
     "branch": "main"
   },
   "repo": {
     "url": "https://github.com/yowanda/Reckora",
-    "head": "fd0e2bb",
+    "head": "18903bc",
     "live_demo": "https://yesmyyt-cacadoxx.hf.space"
   },
   "test_baseline": {
-    "default_dev_extra": "484 passed + 7 skipped",
-    "with_scale_and_gql_extras": "491 passed (with RECKORA_TEST_REDIS_URL set)",
-    "mypy_source_files": 32
+    "default_dev_extra": "510 passed + 7 skipped",
+    "with_scale_and_gql_extras": "517 passed (with RECKORA_TEST_REDIS_URL set)",
+    "mypy_source_files": 33
   },
   "phases": {
     "9a": {"status": "shipped", "feat": "b911a72", "docs": "7e8073e", "tests_added": 41},
     "9b": {"status": "shipped", "feat": "b6073af", "docs": "3d75879", "tests_added": 15},
     "9c": {"status": "shipped", "feat": "ecbebef", "docs": "085fb95", "tests_added": 18},
-    "9d": {"status": "pending", "feat": null, "docs": null, "tests_added": null},
+    "9d": {"status": "shipped", "feat": "18903bc", "docs": null, "tests_added": 26},
     "9e": {"status": "pending", "feat": null, "docs": null, "tests_added": null},
     "9f": {"status": "pending", "feat": null, "docs": null, "tests_added": null},
     "9g": {"status": "pending", "feat": null, "docs": null, "tests_added": null},
     "9h": {"status": "pending", "feat": null, "docs": null, "tests_added": null}
   },
   "active_batch": {
-    "phase": "9d",
+    "phase": "9e",
     "blocking": false,
-    "next_action": "Implement Phase 9d CAPTCHA classifier — see §4 for file-touch map and §5 for design decisions"
+    "next_action": "Implement Phase 9e quarterly catalog auto-refresh — see §4 for file-touch map"
   },
   "deploy_strategy": {
     "decision_date": "2026-05-07",
