@@ -584,6 +584,41 @@ KNOBS: tuple[KnobSpec, ...] = (
             "when ``enable_scan_budget=1``."
         ),
     ),
+    KnobSpec(
+        key="enable_proxy_reputation",
+        settings_attr="enable_proxy_reputation",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 9g: when 1, ``ProxyPool.acquire`` replaces the strict "
+            "round-robin walk with a stride-scheduled weighted pick that "
+            "biases selection toward proxies with a higher running "
+            "success ratio. New proxies get a warm-up window "
+            "(``proxy_warmup_window_days``) during which they are treated "
+            "as 1.0-weight regardless of recorded outcome so they can "
+            "collect enough samples to be ranked fairly. The Phase 8b "
+            "cooldown latch + Phase 9c three-pass region selection are "
+            "preserved on top — reputation is layered *inside* each "
+            "region tier, not in place of it. Off by default — when off, "
+            "the pool walk is byte-for-byte identical to the pre-9g path."
+        ),
+    ),
+    KnobSpec(
+        key="proxy_warmup_window_days",
+        settings_attr="proxy_warmup_window_days",
+        minimum=0,
+        maximum=365,
+        description=(
+            "Phase 9g: number of days a freshly-seen proxy URL stays at "
+            "full warm-up weight (1.0) before its recorded success ratio "
+            "takes over. ``0`` disables the warm-up entirely so every URL "
+            "is ranked by its recorded ratio from the first probe; "
+            "``7`` (the default) gives a fresh proxy roughly a week of "
+            "samples on a 60-second per-host bucket before its weight "
+            "decays on a bad streak. Range 0-365. Only consulted when "
+            "``enable_proxy_reputation=1``."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

@@ -49,6 +49,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from itertools import cycle
 
+from . import proxy_reputation
 from .config import settings
 
 # ---------------------------------------------------------------------------
@@ -140,10 +141,23 @@ class ProxyPool:
         ``preferred_region=None`` the method collapses to the Phase 8b
         single-pass round-robin (preserves bit-for-bit behaviour when
         ``enable_geo_aware_proxy=0``).
+
+        Phase 9g: when the ``enable_proxy_reputation`` knob is on the
+        round-robin pick is replaced with a stride-scheduled weighted
+        pick (see :mod:`backend.app.proxy_reputation`). The weighted
+        path is layered *inside* the same three-pass region tier, so
+        a region preference still wins over reputation when both are
+        on. The default-off knob branch (``enable_proxy_reputation=0``)
+        falls through to the Phase 8b / 9c code below byte-for-byte.
         """
         if not self.urls or self._cursor is None:
             return None
         ts = now if now is not None else time.monotonic()
+        # Phase 9g — reputation-aware pick. Gated by the live admin
+        # knob so the pre-9g code path stays byte-for-byte identical
+        # when the operator hasn't opted in.
+        if proxy_reputation.is_enabled():
+            return self._acquire_weighted(now=ts, preferred_region=preferred_region)
         # Phase 8b single-pass fast path — preferred region not
         # supplied, so don't pay the three-pass cost.
         if preferred_region is None:
@@ -179,6 +193,60 @@ class ProxyPool:
                     return url
         return None
 
+    def _acquire_weighted(
+        self,
+        *,
+        now: float,
+        preferred_region: str | None,
+    ) -> str | None:
+        """Phase 9g: stride-scheduled weighted pick across region tiers.
+
+        Mirrors :meth:`acquire`'s three-pass region structure exactly
+        but replaces the cursor advance with a delegated
+        :meth:`backend.app.proxy_reputation.ProxyReputation.pick` so
+        higher-reputation URLs are picked more often within each tier.
+        Tier fallback semantics are preserved — a region miss still
+        falls through to the default tier and then to any healthy URL.
+        """
+
+        target = preferred_region.strip().lower() if preferred_region else None
+        # Build the per-tier candidate list under the pool lock so the
+        # cooldown read is consistent with whatever ``mark_failed``
+        # write is racing with us. Lock is released before delegating
+        # to the reputation tracker so its lock is not nested under
+        # ours.
+        region_match: list[str] = []
+        default_tier: list[str] = []
+        any_healthy: list[str] = []
+        with self._lock:
+            for url in self.urls:
+                state = self._state[url]
+                if state.cooldown_until > now:
+                    continue
+                any_healthy.append(url)
+                region = state.region.lower()
+                if target is not None and region == target:
+                    region_match.append(url)
+                if region == _DEFAULT_REGION:
+                    default_tier.append(url)
+        rep = proxy_reputation.get_reputation()
+        # Pass 1: region match (skipped when no preferred region).
+        if target is not None:
+            chosen = rep.pick(region_match, now=now)
+            if chosen is not None:
+                return chosen
+            # Pass 2: default region (only when target itself is not
+            # already ``"default"`` — that case collapses pass 1 into 2
+            # and we'd just retry the same candidate set).
+            if target != _DEFAULT_REGION:
+                chosen = rep.pick(default_tier, now=now)
+                if chosen is not None:
+                    return chosen
+        # Pass 3: any healthy URL (fail-open). Also the single-pass
+        # path when ``preferred_region`` is None — matches the Phase
+        # 8b "no region preference" contract.
+        return rep.pick(any_healthy, now=now)
+
     def mark_failed(self, url: str | None, *, now: float | None = None) -> None:
         """Record a failure against ``url`` and put it in cooldown.
 
@@ -186,6 +254,13 @@ class ProxyPool:
         URLs it could have selected. The cooldown duration comes from
         the live ``proxy_health_cooldown_sec`` setting so an admin can
         widen the dead-window without restarting.
+
+        Phase 9g: when ``enable_proxy_reputation`` is on the failure
+        also ticks the URL's reputation counter so the next
+        :meth:`acquire` weighted pick reflects the new ratio. The knob
+        check is on the live admin gate so the pre-9g hot path stays
+        free of the extra counter mutation when the operator has not
+        opted in.
         """
         if url is None:
             return
@@ -197,6 +272,8 @@ class ProxyPool:
                 return
             state.consecutive_failures += 1
             state.cooldown_until = ts + cooldown
+        if proxy_reputation.is_enabled():
+            proxy_reputation.get_reputation().record_failure(url, now=ts)
 
     def mark_success(self, url: str | None) -> None:
         """Reset the failure counter for ``url``.
@@ -204,6 +281,10 @@ class ProxyPool:
         Cooldown is *not* shortened on success — once a URL is in the
         penalty box it serves out the full ``proxy_health_cooldown_sec``
         timer regardless of who else succeeded in the meantime.
+
+        Phase 9g: when ``enable_proxy_reputation`` is on the success
+        also ticks the URL's reputation counter (same gating contract
+        as :meth:`mark_failed`).
         """
         if url is None:
             return
@@ -211,6 +292,8 @@ class ProxyPool:
             state = self._state.get(url)
             if state is not None:
                 state.consecutive_failures = 0
+        if proxy_reputation.is_enabled():
+            proxy_reputation.get_reputation().record_success(url)
 
     def health(self) -> list[dict[str, object]]:
         """Return a JSON-friendly snapshot of every URL's health.
