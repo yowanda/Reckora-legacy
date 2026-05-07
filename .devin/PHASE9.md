@@ -13,7 +13,7 @@
 - **Branch**: `main` (direct push, **no PRs**, never force-push)
 - **Live demo**: <https://yesmyyt-cacadoxx.hf.space> (HF Space; behind `main` HEAD until full Phase 9 deploy — see §7)
 - **Author/committer**: `yowanda <yodadwi4@gmail.com>` (NOT the default Devin author — see §1)
-- **Active phase**: 9h (9a + 9b + 9c + 9d + 9e + 9f + 9g shipped — see §3 status table)
+- **Active phase**: COMPLETE — Phase 9 fully shipped (9a + 9b + 9c + 9d + 9e + 9f + 9g + 9h all in `main`; HF Space mirror at `d526a31` reflects `main` HEAD `03aeadd`)
 
 Phase 9 closes residual risks from the Phase 8 deploy debrief.
 
@@ -141,8 +141,8 @@ Expected: 3 check_runs (`backend`, `frontend`, `e2e (Playwright)`), all `status=
 | 9d | CAPTCHA classifier + structured UNKNOWN labelling | M3 (MEDIUM) | shipped | [`18903bc`](https://github.com/yowanda/Reckora/commit/18903bc) | [`d05fb62`](https://github.com/yowanda/Reckora/commit/d05fb62) | 26 |
 | 9e | quarterly catalog auto-refresh from upstream maigret | M4 (MEDIUM) | shipped | [`ac9bbdf`](https://github.com/yowanda/Reckora/commit/ac9bbdf) | [`47e1a23`](https://github.com/yowanda/Reckora/commit/47e1a23) | 24 |
 | 9f | per-scan hard budget with new SKIPPED bucket | M5 (MEDIUM) | shipped | [`7dd7bfd`](https://github.com/yowanda/Reckora/commit/7dd7bfd) | [`736792b`](https://github.com/yowanda/Reckora/commit/736792b) | 17 |
-| 9g | proxy reputation warm-up + weighted selection | M6 (MEDIUM) | shipped | [`2d5f4ad`](https://github.com/yowanda/Reckora/commit/2d5f4ad) | _pending docs commit_ | 28 |
-| 9h | HF Space keep-warm cron | M7 (MEDIUM) | pending | — | — | — |
+| 9g | proxy reputation warm-up + weighted selection | M6 (MEDIUM) | shipped | [`2d5f4ad`](https://github.com/yowanda/Reckora/commit/2d5f4ad) | [`74171d2`](https://github.com/yowanda/Reckora/commit/74171d2) | 28 |
+| 9h | HF Space keep-warm cron | M7 (MEDIUM-LOW) | shipped | [`ea763c2`](https://github.com/yowanda/Reckora/commit/ea763c2) | _this commit_ | 28 |
 
 ### Test baseline ratchet
 
@@ -156,7 +156,7 @@ Expected: 3 check_runs (`backend`, `frontend`, `e2e (Playwright)`), all `status=
 | 9e | 534 + 7 skipped | 541 (+24 tests) |
 | 9f | 551 + 7 skipped | 558 (+17 tests) |
 | 9g | 579 + 7 skipped | 586 (+28 tests) |
-| 9h (target) | ~580 + 7 skipped | ~587 (+1 test smoke) |
+| 9h | 607 + 7 skipped | 614 (+28 tests) |
 
 **The number must monotonically grow.** Never delete or weaken existing tests.
 
@@ -172,12 +172,12 @@ Expected: 3 check_runs (`backend`, `frontend`, `e2e (Playwright)`), all `status=
   },
   "repo": {
     "url": "https://github.com/yowanda/Reckora",
-    "head": "2d5f4ad",
+    "head": "03aeadd",
     "live_demo": "https://yesmyyt-cacadoxx.hf.space"
   },
   "test_baseline": {
-    "default_dev_extra": "579 passed + 7 skipped",
-    "with_scale_and_gql_extras": "586 passed (with RECKORA_TEST_REDIS_URL set)",
+    "default_dev_extra": "607 passed + 7 skipped",
+    "with_scale_and_gql_extras": "614 passed (with RECKORA_TEST_REDIS_URL set)",
     "mypy_source_files": 35
   },
   "phases": {
@@ -187,18 +187,19 @@ Expected: 3 check_runs (`backend`, `frontend`, `e2e (Playwright)`), all `status=
     "9d": {"status": "shipped", "feat": "18903bc", "docs": "d05fb62", "tests_added": 26},
     "9e": {"status": "shipped", "feat": "ac9bbdf", "docs": "47e1a23", "tests_added": 24},
     "9f": {"status": "shipped", "feat": "7dd7bfd", "docs": "736792b", "tests_added": 17},
-    "9g": {"status": "shipped", "feat": "2d5f4ad", "docs": null, "tests_added": 28},
-    "9h": {"status": "pending", "feat": null, "docs": null, "tests_added": null}
+    "9g": {"status": "shipped", "feat": "2d5f4ad", "docs": "74171d2", "tests_added": 28},
+    "9h": {"status": "shipped", "feat": "ea763c2", "docs": null, "tests_added": 28}
   },
   "active_batch": {
-    "phase": "9h",
+    "phase": "COMPLETE",
     "blocking": false,
-    "next_action": "Implement Phase 9h HF Space keep-warm cron — see §4 for file-touch map"
+    "next_action": "Phase 9 fully shipped (8/8 sub-phases). HF Space mirror deployed (HEAD d526a31 reflects main 03aeadd). Operator opt-in activation: flip admin knobs in order 9a → 9b → 9c → 9d → 9f → 9g (9e + 9h are infra-only, no knob)."
   },
   "deploy_strategy": {
     "decision_date": "2026-05-07",
     "locked_in": true,
-    "decision": "Wait until Phase 9 is fully complete (9a-9h shipped + green CI) before mirroring to HF Space. After 9h ships, do ONE deploy + activate pass."
+    "decision": "Wait until Phase 9 is fully complete (9a-9h shipped + green CI) before mirroring to HF Space. After 9h ships, do ONE deploy + activate pass.",
+    "mirror_status": "DONE — HF Space HEAD d526a31 mirrors main 03aeadd as of 2026-05-07T14:45:55Z; runtime stage RUNNING; /api/health surfaces Phase 9 keys (anti_bot, host_rate_limit.backend, proxy_pool.geo_aware_*) confirming Phase 9 image is live."
   }
 }
 ```
@@ -357,4 +358,4 @@ Whenever quota drops below 15%, **immediately**:
 
 ---
 
-*Last updated: 2026-05-07 — Phase 9g shipped, 9h pending, deploy strategy locked-in.*
+*Last updated: 2026-05-07 — Phase 9 COMPLETE (9a-9h all shipped + green CI). HF Space mirror deployed to `d526a31`.*

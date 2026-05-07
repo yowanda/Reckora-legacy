@@ -43,7 +43,7 @@ against live HF Space, and is benchmarked here with concrete numbers.
 | 6 — accuracy & gap closure vs maigret | shipped (4/4: 6a, 6b, 6c, 6d) | **2,506** (regen from upstream) | 0–100 + ML | yes | yes + engine-aware probes | yes | yes | yes | yes |
 | 7 — intel & enrichment | shipped 4/4 (**7a** pHash + **7b** WHOIS/HIBP + **7c** reverse-image + **7d** ML retrain + drift) | 2,506+ | 0–100 + ML retrainable | yes | yes | yes | yes | yes + pHash image stitching | yes + WHOIS/HIBP/reverse-image/ML drift |
 | 8 — scale & infra | shipped (4/4: 8a Celery+Redis, 8b proxy rotator, 8c GraphQL gateway, 8d public-scan edge cache; deployed `0551938 → 5723927`) | 2,506 | 0–100 + ML | yes (distributed worker fleet, opt-in) | yes | yes | yes (rotating proxy pool, opt-in) | yes | yes |
-| 9 — anti-bot probe + scale-out reliability | in-flight (7/8: **9a** anti-bot probe pipeline shipped — `b911a72`; **9b** distributed host rate limit shipped — `b6073af`; **9c** geo-aware proxy selection shipped — `ecbebef`; **9d** CAPTCHA classifier + structured `UNKNOWN` labelling shipped — `18903bc`; **9e** quarterly catalog auto-refresh shipped — `ac9bbdf`; **9f** per-scan hard budget + SKIPPED bucket shipped — `7dd7bfd`; **9g** proxy reputation warm-up + weighted selection shipped — `2d5f4ad`; 9h pending — see [ROADMAP](./ROADMAP.md)) | catalog freshness ≤1%/quarter via **9e — shipped** | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware proxy selection via **9c — shipped**; reputation-weighted proxy pool via **9g — shipped**; CAPTCHA classifier via **9d — shipped**; per-scan hard budget + SKIPPED bucket via **9f — shipped**) | yes | yes |
+| 9 — anti-bot probe + scale-out reliability | shipped (8/8: **9a** anti-bot probe pipeline — `b911a72`; **9b** distributed host rate limit — `b6073af`; **9c** geo-aware proxy selection — `ecbebef`; **9d** CAPTCHA classifier + structured `UNKNOWN` labelling — `18903bc`; **9e** quarterly catalog auto-refresh — `ac9bbdf`; **9f** per-scan hard budget + SKIPPED bucket — `7dd7bfd`; **9g** proxy reputation warm-up + weighted selection — `2d5f4ad`; **9h** HF Space keep-warm cron — `ea763c2`; HF Space mirror deployed `5723927 → d526a31`) | catalog freshness ≤1%/quarter via **9e — shipped** | 0–100 + ML | yes (Redis sliding-window rate limit shared across N Celery workers via **9b — shipped**) | yes | yes | yes (curl-cffi JA3/JA4 + Playwright fallback via **9a — shipped**; geo-aware proxy selection via **9c — shipped**; reputation-weighted proxy pool via **9g — shipped**; CAPTCHA classifier via **9d — shipped**; per-scan hard budget + SKIPPED bucket via **9f — shipped**) | yes | yes |
 
 > [`ROADMAP.md`](./ROADMAP.md) is the **single source of truth** for what's
 > in flight + planned. The "Live status" header at the top of the roadmap is
@@ -78,9 +78,11 @@ against live HF Space, and is benchmarked here with concrete numbers.
 > revalidation for anonymous share links (opt-in via
 > `enable_share_links=1`). All four sub-phases ship default-off so
 > the live HF Space byte-for-byte mirror of `main` stays unchanged in
-> default deployment. Phase 9 is the in-flight batch — it closes
-> the residual-risk gaps that Phase 8b's proxy rotator does *not*
-> cover. **9a (anti-bot probe pipeline) is shipped** (`b911a72`):
+> default deployment. Phase 9 closes the residual-risk gaps that
+> Phase 8b's proxy rotator does *not* cover — **all 8 sub-phases
+> (9a–9h) are shipped** and the HF Space mirror has been deployed
+> to `d526a31` (mirroring main `03aeadd`). **9a (anti-bot probe
+> pipeline) shipped** (`b911a72`):
 > a curl-cffi `AsyncSession`-backed `httpx.AsyncBaseTransport`
 > spoofs real Chrome / Safari / Firefox TLS handshake bytes
 > (cipher suite ordering + extension list = JA3 / JA4) plus a
@@ -203,9 +205,17 @@ against live HF Space, and is benchmarked here with concrete numbers.
 > keeps the Phase 8b round-robin walk + Phase 9c three-pass
 > region selection byte-for-byte identical to the pre-9g pool
 > selection. Closes residual-risk **M6** (round-robin pool
-> ignores per-proxy reliability; **MEDIUM**). The remaining
-> sub-phase (9h) covers an HF Space keep-warm cron. Each
-> Phase 9 sub-phase carries the residual-risk ID it closes
+> ignores per-proxy reliability; **MEDIUM**).
+> **9h (HF Space keep-warm cron) shipped** (`ea763c2`): a new
+> pure-stdlib `backend/scripts/hf_space_keep_warm.py` ping script
+> (`urllib.request` only — no httpx / requests dependency, so the
+> GitHub Actions runner needs no Reckora extras) plus a new
+> `.github/workflows/hf-keep-warm.yml` cron workflow (`*/30 * * * *`)
+> hits `GET /api/health` every 30 minutes so the HF Space free-tier
+> container stays warm and returning users hit a sub-second
+> response instead of the 30–45s Docker cold-boot. Closes
+> residual-risk **M7** (cold-start latency; **MEDIUM-LOW**).
+> Each Phase 9 sub-phase carries the residual-risk ID it closes
 > (`C1`, `C2`, `M1`–`M7` from the Phase 8 deploy debrief) and
 > is detailed in [`ROADMAP.md`](./ROADMAP.md).
 
