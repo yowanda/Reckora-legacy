@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-05-07T06:10:00Z",
+  "last_updated": "2026-05-07T06:30:00Z",
   "session": {
     "devin_session_url": "https://app.devin.ai/sessions/bb4783634e7f4a6788ec51e61926a8eb",
     "git_author": "yowanda <yodadwi4@gmail.com>",
@@ -9,7 +9,7 @@
   },
   "repo": {
     "url": "https://github.com/yowanda/Reckora",
-    "head": "085fb95",
+    "head": "51f04f9",
     "live_demo": "https://yesmyyt-cacadoxx.hf.space"
   },
   "test_baseline": {
@@ -91,6 +91,21 @@
     },
     "resume_instructions": "After user confirms quota is safe, continue from step (1) of next_action. The phase9_progress.json + ROADMAP.md + README.md are all up-to-date with 9c shipped status. Repo HEAD is 085fb95. No untracked or staged changes; safe to start 9d implementation cleanly."
   },
+  "deploy_strategy": {
+    "decision_date": "2026-05-07",
+    "decision": "Wait until Phase 9 is fully complete (9a-9h shipped + green CI) before mirroring to HF Space. After 9h ships, do ONE deploy + activate pass.",
+    "locked_in": true,
+    "steps": [
+      "Mirror main HEAD to HF Space remote (huggingface.co/spaces/<owner>/<space>) using HF_TOKEN already saved in Devin secrets",
+      "Update Dockerfile to install Playwright + Chromium for 9a activation",
+      "Provision a Redis service (managed Redis URL) for 9b activation",
+      "Configure RECKORA_PROXY_POOL_URLS with region:url syntax for 9c",
+      "Flip admin knobs in order: 9a -> 9b -> 9c -> 9d -> 9f -> 9g (9e and 9h are infra-only, no knob)",
+      "Smoke test each capability via the live demo"
+    ],
+    "reasoning": "avoids the 'half-deployed Phase 9' state where some capabilities are live and others are not. Operators only need to learn the activation sequence once."
+  },
+  "runbook": ".devin/PHASE9_RUNBOOK.md - full Phase 9 mechanics (push method, per-batch workflow, test sweep, CI poll, file-touch map, default-off contract, resume protocol, common pitfalls). Read this FIRST in every new session before starting work.",
   "rules": {
     "default_off": "All Phase 9 admin knobs default to 0 (or empty string for URL fields) so HF Space's single-container deployment stays byte-for-byte unchanged until an operator opts in.",
     "no_pr_workflow": "User has explicitly requested direct push to main (no PR). Do not create PRs.",
