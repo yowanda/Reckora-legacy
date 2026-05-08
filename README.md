@@ -27,6 +27,36 @@ It does **not** bypass authentication, scrape private content, or attempt
 credential discovery. Use it only for legitimate self-research, security
 work, or journalism.
 
+## Why Reckora vs. maigret?
+
+Reckora started as a Python-only fork of maigret and has since diverged
+on the dimensions OSINT operators care about most:
+
+| Dimension | maigret (CLI) | Reckora (web + workers) |
+| --- | --- | --- |
+| **Anti-bot probe pipeline** | `cloudscraper` Cloudflare fallback only | curl-cffi JA3 / JA4 TLS impersonation **plus** headless-Chromium fallback (Phase 9a, default-off `enable_anti_bot_pipeline`) |
+| **Scale-out** | single-process asyncio | distributed Celery + Redis worker fleet, Redis sliding-window per-host rate limit (Phase 8a / 9b, opt-in `[scale]` extra) |
+| **Confidence scoring** | binary CLAIMED / FREE | 0-100 confidence + signals array + `verified` flag + post-claim link-liveness probe (Phase 1 → 5h) |
+| **ML reranker** | none | bundled ONNX classifier with retrain pipeline + Kolmogorov-Smirnov drift detector (Phase 4 / 7d) |
+| **Identity enrichment** | username only | recursive identity extraction (Phase 3), profile-image pHash graph stitching (7a), WHOIS / HIBP enrichment (7b), reverse-image lookup (7c) |
+| **Catalog** | ~3 154 entries (with disabled subset) | **~2 506 active sites** — quarterly auto-refreshed from upstream maigret (Phase 9e), with `+~500` tentative sites available behind `enable_tentative_sites` (Phase 10b) |
+| **Operator surface** | CLI only | members-only web UI + admin live DB editor + per-member scan history + scan diff + `reckora-cli` console-script (Phase 10f, in flight) |
+| **Streaming** | tqdm progress bar | SSE per-result events, default-on for the SPA, default-off CDN edge cache for shared scans (Phase 8d) |
+| **Reports** | HTML / TXT / PDF | CSV / JSON / Markdown / HTML / PDF / **XMind8 / D3 force graph / plain-text** (Phase 5b / 6d / 10h) plus auto-PDF on initial CLAIMED hit (Phase 10a) |
+| **Governance** | community CLI | members-only by default, default-off Phase 10 knobs so the live HF Space stays byte-for-byte identical until an operator opts in |
+
+A head-to-head benchmark report lives at
+[`comparison-maigret.md`](./comparison-maigret.md). Try the live mirror at
+<https://yesmyyt-cacadoxx.hf.space>.
+
+> **Governance.** Reckora is MIT-licensed (see [`LICENSE`](./LICENSE)).
+> Contribution rules live in [`CONTRIBUTING.md`](./CONTRIBUTING.md), the
+> code of conduct in [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md),
+> security disclosure policy in [`SECURITY.md`](./SECURITY.md), and the
+> per-phase changelog in [`CHANGELOG.md`](./CHANGELOG.md).
+> [`ROADMAP.md`](./ROADMAP.md) is the single source of truth for what's
+> in flight.
+
 ## Progress / changelog
 
 Reckora is being upgraded in 4 phases to surpass maigret on the dimensions
