@@ -1944,7 +1944,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
     { name = "weasyprint", marker = "extra == 'pdf'", specifier = ">=62.0" },
 ]
-provides-extras = ["dev", "pdf", "scale", "gql"]
+provides-extras = ["dev", "pdf", "scale", "gql", "cli"]
 
 [[package]]
 name = "redis"

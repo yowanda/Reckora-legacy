@@ -66,6 +66,20 @@ scale = ["celery>=5.4.0", "redis>=5.0.0"]
 # Strawberry's FastAPI integration owns the schema-to-router wiring;
 # pinning ``>=0.235`` for stable async resolver support.
 gql = ["strawberry-graphql[fastapi]>=0.235.0"]
+# Phase 10f: ``reckora-cli`` console-script. Deliberately empty — the
+# CLI reuses ``app.checker`` / ``app.sites`` / ``app.exports`` so the
+# only runtime dep beyond the base install is stdlib argparse, and the
+# extra exists as a documentation hook ("install with ``[cli]`` if you
+# want the console-script") rather than to pull in a separate set of
+# packages. Future enrichments (e.g. tabulate-rendered progress bars,
+# rich-text spinner) would land here.
+cli = []
+
+[project.scripts]
+# Phase 10f: ``reckora`` console-script entrypoint. Exposes
+# ``app.cli.__main__:main`` so ``pip install reckora-backend[cli]``
+# (or a plain editable install) gets the ``reckora`` binary on PATH.
+reckora = "app.cli.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
