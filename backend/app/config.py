@@ -568,5 +568,32 @@ class Settings(BaseSettings):
     # report; off-the-shelf operators usually want the full picture.
     initial_hit_include_extras: int = 1
 
+    # Phase 10g: AI investigation summary.
+    #
+    # Master switch (``0``=off, ``1``=on). When off, the
+    # ``POST /api/history/{scan_id}/ai_summary`` endpoint returns 503
+    # so the SPA's "AI summary" tab knows to render a "feature
+    # disabled" hint instead of the live preview. Default-off so
+    # the live HF Space mirror stays byte-for-byte identical until
+    # an operator explicitly opts in (which also means configuring
+    # an API key in ``secrets.json`` — see ``app.secrets_store``).
+    enable_ai_summary: int = 0
+    # Provider name. One of ``openai`` / ``anthropic`` / ``openrouter``
+    # / ``ollama``. The provider determines the wire format and the
+    # default base URL when ``ai_summary_base_url`` is empty.
+    # Ranged knobs are int-only in the admin DB so the runtime stores
+    # the *index* of this list; the string surface lives on this
+    # ``Settings`` field for the env-var override path.
+    ai_summary_provider: str = "openai"
+    # HTTP base URL for the chat-completion endpoint. Empty means
+    # "use the provider default" — for ``openai`` that is
+    # ``https://api.openai.com/v1``. Operators using a private
+    # OpenAI-compatible proxy point this at their own host so calls
+    # never leave their VPC.
+    ai_summary_base_url: str = ""
+    # Model id, e.g. ``gpt-4o-mini`` for OpenAI, ``llama3.1`` for a
+    # local Ollama deploy. Empty means "use the provider default".
+    ai_summary_model: str = ""
+
 
 settings = Settings()

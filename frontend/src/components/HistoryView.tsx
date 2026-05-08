@@ -14,6 +14,7 @@ import {
   type ScanSummary,
   type Status,
 } from '../types'
+import { AISummary } from './AISummary'
 
 // Phase 5b + 6d + 10h: visible export formats in the scan modal. Order
 // matters here — the first option ("HTML") is what most operators want
@@ -271,6 +272,7 @@ function ScanModal({ detail, onClose }: { detail: ScanDetail; onClose: () => voi
             {exportError}
           </p>
         )}
+        <AISummary scanId={detail.scan.id} />
         <div className="space-y-1 text-xs">
           {detail.results
             .filter((r) => r.status === 'claimed')

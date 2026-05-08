@@ -759,6 +759,25 @@ KNOBS: tuple[KnobSpec, ...] = (
             'configuration for "look but never trust" runs.'
         ),
     ),
+    KnobSpec(
+        key="enable_ai_summary",
+        settings_attr="enable_ai_summary",
+        minimum=0,
+        maximum=1,
+        description=(
+            "Phase 10g: master switch for the AI investigation "
+            "summary endpoint ``POST /api/history/{scan_id}/ai_summary``. "
+            "Default-off so the live HF Space mirror stays byte-for-byte "
+            "identical until an operator opts in. When ``1`` the SPA "
+            'shows an "AI summary" panel under the scan timeline; the '
+            "endpoint reads the configured provider (``ai_summary_"
+            "provider``), model (``ai_summary_model``), and base URL "
+            "(``ai_summary_base_url``) and streams a markdown summary "
+            "back to the SPA. The provider API key is stored in "
+            "``secrets.json`` (see ``app.secrets_store``), never in "
+            "this admin DB."
+        ),
+    ),
 )
 
 KNOBS_BY_KEY: dict[str, KnobSpec] = {k.key: k for k in KNOBS}

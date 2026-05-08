@@ -527,6 +527,26 @@ export interface EnrichmentResponse {
 }
 
 // Phase 7c: reverse-image lookup hook.
+// ---------------------------------------------------------------------------
+// Phase 10g: AI investigation summary.
+//
+// The summary is streamed back as plain markdown over a chunked
+// HTTP response from ``POST /api/history/{scan_id}/ai_summary``. The
+// SPA renders the chunks incrementally so the operator sees the
+// summary materialise in real time. ``configured`` mirrors the admin
+// "secrets" status (``GET /api/admin/secrets``) — when ``false`` the
+// SPA shows a "configure your API key first" hint instead of the live
+// preview, which avoids the pointless 412 round-trip.
+// ---------------------------------------------------------------------------
+
+export interface AiSummarySecretsStatus {
+  ai_summary_api_key: boolean
+}
+
+export interface AdminSecretsResponse {
+  secrets: AiSummarySecretsStatus
+}
+
 export interface ReverseImageProvider {
   slug: string
   label: string

@@ -2,6 +2,7 @@ import { ApiError } from './types'
 import type {
   AdminKnobsPatch,
   AdminKnobsResponse,
+  AdminSecretsResponse,
   AdminSiteEntry,
   AdminSitesResponse,
   CheckResult,
@@ -290,6 +291,75 @@ export async function deleteHistoryScan(scanId: number): Promise<void> {
 
 export async function diffHistory(fromId: number, toId: number): Promise<ScanDiff> {
   return jsonFetch<ScanDiff>(`/api/history/diff/${fromId}/${toId}`)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10g: AI investigation summary streaming + admin secrets store.
+// ---------------------------------------------------------------------------
+
+/**
+ * Stream the AI investigation summary for a finished scan.
+ *
+ * Calls ``POST /api/history/{scanId}/ai_summary`` and forwards every
+ * decoded UTF-8 chunk to ``onChunk`` so the SPA can render the summary
+ * incrementally. Resolves when the upstream stream closes; rejects with
+ * an :class:`ApiError` on a non-2xx status (the backend uses 412 when
+ * the API key is unconfigured and 503 when ``enable_ai_summary`` is
+ * off, so callers can distinguish "configure first" from "feature
+ * disabled" without parsing the body).
+ */
+export async function streamAiSummary(
+  scanId: number,
+  onChunk: (chunk: string) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const r = await fetch(`${API_BASE}/api/history/${scanId}/ai_summary`, {
+    method: 'POST',
+    credentials: 'include',
+    signal,
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    let detail = `HTTP ${r.status}`
+    try {
+      const j = JSON.parse(text)
+      if (j.detail) detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+    } catch {
+      if (text) detail = text
+    }
+    throw new ApiError(r.status, detail)
+  }
+  if (!r.body) {
+    throw new ApiError(500, 'streaming response not supported by this browser')
+  }
+  const reader = r.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    if (value) onChunk(decoder.decode(value, { stream: true }))
+  }
+  // Flush any trailing bytes left in the decoder's internal buffer
+  // (incomplete UTF-8 sequences at the end of the last chunk).
+  const tail = decoder.decode()
+  if (tail) onChunk(tail)
+}
+
+export async function adminListSecrets(): Promise<AdminSecretsResponse> {
+  return jsonFetch<AdminSecretsResponse>('/api/admin/secrets')
+}
+
+export async function adminSetSecret(key: string, value: string): Promise<void> {
+  await jsonFetch<{ ok: boolean }>(`/api/admin/secrets/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ value }),
+  })
+}
+
+export async function adminDeleteSecret(key: string): Promise<void> {
+  await jsonFetch<{ ok: boolean }>(`/api/admin/secrets/${encodeURIComponent(key)}`, {
+    method: 'DELETE',
+  })
 }
 
 // Phase 5b + 6d + 10h: history export. The formats below match

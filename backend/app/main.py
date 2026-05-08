@@ -1907,6 +1907,142 @@ async def history_diff(
     return diff
 
 
+# ---------------------------------------------------------------------------
+# Phase 10g: AI investigation summary + runtime API-key secrets store.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/history/{scan_id}/ai_summary")
+async def history_ai_summary(
+    scan_id: int,
+    member: Member = Depends(current_member),
+) -> Response:
+    """Stream a markdown investigation summary for a finished scan.
+
+    Closes the AI-summary gap with maigret's ``--ai`` feature: the
+    handler reads scan history + extractor fields + graph edges + pHash
+    matches, builds an internal markdown report, and forwards that
+    report to the configured chat-completion provider (OpenAI /
+    Anthropic / OpenRouter / local Ollama). The upstream stream is
+    proxied verbatim back to the SPA so the operator sees the summary
+    materialise in real time.
+
+    Status codes:
+      * ``200`` — streamed ``text/markdown`` body.
+      * ``404`` — scan id not visible to ``member`` or scan history
+        disabled.
+      * ``412`` — provider requires an API key but ``secrets.json``
+        doesn't have one configured. The SPA renders this as a
+        "configure your API key first" hint instead of a generic 500.
+      * ``503`` — the master switch ``enable_ai_summary`` is off.
+    """
+    from . import ai_summary as ai_mod
+
+    if not settings.enable_scan_history:
+        raise HTTPException(404, "scan history disabled")
+    if not ai_mod.is_enabled():
+        raise HTTPException(503, "ai summary disabled")
+    out = history_mod.get_scan(scan_id, member.username)
+    if out is None:
+        raise HTTPException(404, "scan not found")
+    summary, results = out
+
+    try:
+        provider, model, base_url, api_key = ai_mod.resolve_request_args()
+    except ai_mod.MissingApiKeyError as exc:
+        raise HTTPException(412, str(exc) or "ai_summary_api_key not configured") from exc
+    except ai_mod.UnknownProviderError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    prompt = ai_mod.build_markdown_report(
+        summary,
+        results,
+        graph_edges=ai_mod.graph_edges_from_results(results),
+        phash_matches=ai_mod.phash_matches_from_results(results),
+    )
+
+    async def _generate() -> AsyncIterator[bytes]:
+        try:
+            async for fragment in ai_mod.stream_summary(
+                provider=provider,
+                model=model,
+                base_url=base_url,
+                api_key=api_key,
+                prompt=prompt,
+            ):
+                yield fragment.encode("utf-8")
+        except ai_mod.AiSummaryError as exc:
+            # Errors mid-stream surface as a trailing markdown block —
+            # the response has already started so we can't send a
+            # different status code.
+            yield (f"\n\n> AI summary error: {exc}\n").encode()
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "cache-control": "private, no-store",
+            "x-content-type-options": "nosniff",
+        },
+    )
+
+
+class AiSecretPut(BaseModel):
+    value: str = Field(min_length=1, max_length=4096)
+
+
+@app.get("/api/admin/secrets")
+async def admin_list_secrets(
+    _: Member = Depends(current_admin),
+) -> dict[str, Any]:
+    """Per-key ``{key: configured}`` map — values are never returned.
+
+    Read by the AdminPanel "AI summary" pane so the operator can see
+    whether an API key is set without the response leaking the key
+    itself.
+    """
+    from . import secrets_store
+
+    return {"secrets": secrets_store.list_status()}
+
+
+@app.put("/api/admin/secrets/{key}")
+async def admin_set_secret(
+    key: str,
+    body: AiSecretPut,
+    _: Member = Depends(current_admin),
+) -> dict[str, Any]:
+    """Persist a runtime secret to ``secrets.json``.
+
+    Only keys in :data:`app.secrets_store.ALLOWED_KEYS` are accepted —
+    the allowlist lives in code so a typo'd PUT can't smuggle a stray
+    "secret" onto disk.
+    """
+    from . import secrets_store
+
+    if key not in secrets_store.ALLOWED_KEYS:
+        raise HTTPException(404, f"unknown secret key: {key}")
+    try:
+        secrets_store.set_secret(key, body.value)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "key": key, "configured": True}
+
+
+@app.delete("/api/admin/secrets/{key}")
+async def admin_delete_secret(
+    key: str,
+    _: Member = Depends(current_admin),
+) -> dict[str, Any]:
+    """Drop a runtime secret from ``secrets.json``."""
+    from . import secrets_store
+
+    if key not in secrets_store.ALLOWED_KEYS:
+        raise HTTPException(404, f"unknown secret key: {key}")
+    removed = secrets_store.delete_secret(key)
+    return {"ok": True, "key": key, "configured": False, "removed": removed}
+
+
 _maybe_static_dir = settings.static_dir
 if _maybe_static_dir and _maybe_static_dir.exists():
     # Re-bind to a non-Optional name so the closure below type-checks
